@@ -32,13 +32,13 @@ class BoxPlugin(Star):
                 t.cancel()
             await asyncio.gather(*self._recall_tasks, return_exceptions=True)
 
-    @filter.command("盒", alias={"开盒", "box"})
+    @filter.command("资料卡", alias={"盒", "开盒", "box"})
     async def on_command(
         self,
         event: AiocqhttpMessageEvent,
         input_id: int | str | None = None,
     ):
-        """盒 @群友/@qq, 查询 QQ 用户资料信息"""
+        """资料卡 @群友/@qq, 查询 QQ 用户资料信息"""
         if self.cfg.only_admin and not event.is_admin() and input_id:
             return
 
@@ -117,7 +117,7 @@ class BoxPlugin(Star):
 
     @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
     async def handle_group_add(self, event: AiocqhttpMessageEvent):
-        """自动开盒新群友/主动退群之人"""
+        """自动展示新群友/主动退群之人的资料卡"""
         raw = getattr(event.message_obj, "raw_message", None)
 
         if not (

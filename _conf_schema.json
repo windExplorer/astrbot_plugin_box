@@ -1,34 +1,34 @@
 {
     "only_admin": {
-        "description": "仅bot管理员可开盒他人",
+        "description": "仅Bot管理员可查询他人资料",
         "type": "bool",
-        "hint": "但自己开盒自己不受限制",
+        "hint": "但查询自己的资料不受限制",
         "default": false
     },
     "protect_ids": {
         "description": "信息保护用户",
         "type": "list",
-        "hint": "开盒时，会忽略黑名单中的用户，注意：Bot和Bot管理员已默认被保护，除非Bot管理员亲自使用命令盒自己，否则无法被开盒",
+        "hint": "查询时，会忽略名单中的用户。注意：Bot和Bot管理员已默认被保护，除非Bot管理员亲自查询自己，否则无法被查询",
         "default": []
     },
     "autobox": {
-        "description": "自动开盒配置",
+        "description": "自动展示配置",
         "type": "object",
         "hint": "",
         "items": {
             "white_groups": {
-                "description": "自动开盒群聊白名单",
+                "description": "自动展示群聊白名单",
                 "type": "list",
-                "hint": "只自动开盒白名单群聊的新群友/主动退群的人，不填则默认所有群聊都启用自动开盒",
+                "hint": "只自动展示白名单群聊中新群友/主动退群之人的资料卡，不填则默认所有群聊都启用自动展示",
                 "default": []
             },
             "enter": {
-                "description": "自动开盒新进群的人",
+                "description": "自动展示新进群成员的资料卡",
                 "type": "bool",
                 "default": false
             },
             "exit": {
-                "description": "自动开盒主动退群的人",
+                "description": "自动展示主动退群成员的资料卡",
                 "type": "bool",
                 "default": false
             }
@@ -114,7 +114,7 @@
     },
     "recall_time": {
         "description": "撤回时间(秒)",
-        "hint": "几秒后撤回开盒卡片，设为 0 则不撤回",
+        "hint": "几秒后撤回资料卡，设为 0 则不撤回",
         "type": "int",
         "slider": {
             "min": 0,

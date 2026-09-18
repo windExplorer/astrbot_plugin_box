@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.1.0
+
+Fork 重构：基于 Zhalslar/astrbot_plugin_box v1.4.0 更名换装，功能逻辑保持不变。版本号自本 fork 起重新计数。
+
+- 展示名更改为「萌萌资料卡」，重绘 logo，`metadata.yaml` 的作者与仓库信息改为 windExplorer（技术名 `astrbot_plugin_box` 保持不变，与目录名、仓库名一致）。
+- 主指令由 `/盒` 改为 `/资料卡`，保留 `盒` / `开盒` / `box` 作为别名，旧用法不受影响。
+- 配置页与文档字符串去除「开盒」表述，统一为「查询 / 展示资料卡」。
+- README 重写：补充原项目致谢；修正许可证徽章（原 README 标注 GPLv3，实际 LICENSE 为 AGPL-3.0）。
+
 ## v1.4.0
 
 新功能：

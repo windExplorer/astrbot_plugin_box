@@ -1,26 +1,28 @@
-
 <div align="center">
 
-![:name](https://count.getloli.com/@astrbot_plugin_box?name=astrbot_plugin_box&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
+<img src="logo.png" width="200" alt="萌萌资料卡"/>
 
-# astrbot_plugin_box
+# 萌萌资料卡
 
-_✨ QQ资料卡片插件 ✨_  
+_✨ astrbot_plugin_box · QQ 资料卡片插件 ✨_
 
-[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![AstrBot](https://img.shields.io/badge/AstrBot-4.0%2B-orange.svg)](https://github.com/Soulter/AstrBot)
-[![GitHub](https://img.shields.io/badge/作者-Zhalslar-blue)](https://github.com/Zhalslar)
+[![AstrBot](https://img.shields.io/badge/AstrBot-4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
+[![GitHub](https://img.shields.io/badge/作者-windExplorer-blue)](https://github.com/windExplorer)
 
 </div>
 
 ## 🤝 介绍
 
-严格遵循OnebotV11协议，获取QQ用户主页资料, 并以图片形式展示
+严格遵循 OnebotV11 协议，获取 QQ 用户主页资料，并以萌萌卡片图片形式展示。
+
+> 本插件基于 [Zhalslar/astrbot_plugin_box](https://github.com/Zhalslar/astrbot_plugin_box)（v1.4.0）Fork 修改而来，感谢原作者的贡献。
+> 本项目遵循 AGPL-3.0 协议开源。
 
 ## 📦 安装
 
-在astrbot的插件面板上通过链接安装：[https://github.com/Zhalslar/astrbot_plugin_box](https://github.com/Zhalslar/astrbot_plugin_box)
+在 AstrBot 的插件面板上通过链接安装：[https://github.com/windExplorer/astrbot_plugin_box](https://github.com/windExplorer/astrbot_plugin_box)
 
 ## ⌨️ 使用说明
 
@@ -31,26 +33,19 @@ _✨ QQ资料卡片插件 ✨_
 - 指令调用，支持直接@或者@加上QQ号(请必须加上@， 不要直接用一串数字)，如：
 
 ```plaintext
-/box@某人
-/box @QQ
+/资料卡@某人
+/资料卡 @QQ
 ```
+
+- 兼容旧指令：`/盒`、`/开盒`、`/box` 用法相同
 
 ### 示例图
 
 <img width="1102" height="417" alt="图片" src="https://github.com/user-attachments/assets/5174a076-b9c3-443a-9f77-4acea32268b3" />
 
-
-## 👥 贡献指南
-
-- 🌟 Star 这个项目！（点右上角的星星，感谢支持！）
-- 🐛 提交 Issue 报告问题
-- 💡 提出新功能建议
-- 🔧 提交 Pull Request 改进代码
-
 ## 📌 注意事项
 
 - 卡片信息在QQ主页也能查看，本插件仅供学习交流，作者不承担任何责任
-- 想第一时间得到反馈的可以来作者的插件反馈群（QQ群）：460973561（不点star不给进）
 
 ## 🚫 免责声明
 
