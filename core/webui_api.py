@@ -271,43 +271,53 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         return _ok({"group_id": gid, "total": len(out), "unrecorded": unrecorded, "members": out})
 
     async def h_llm_models(*_args, **_kwargs) -> dict:
-        """枚举可用的 LLM 提供商与模型 + 当前的模型选择，供面板「模型设置」使用。"""
+        """列出可用的对话模型提供商（模型选择以「提供商」为单位）。
+
+        AstrBot 里一个提供商就绑定一个模型，下拉里一项 = 一个提供商，显示成
+        「名称 · 模型」；只列已加载的——AstrBot 遇到不存在的提供商 id 会直接
+        放弃本次 LLM 请求，所以必须让前端只能从这份名单里选。
+        """
+        default_id = ""
         try:
-            insts = plugin.context.provider_manager.get_insts() or []
-        except Exception as e:
-            return _err(f"获取提供商失败: {e}")
-        using_id = ""
-        try:
-            using = plugin.context.get_using_provider()
-            using_id = using.meta().id if using else ""
+            prov = await plugin.context.get_using_provider_async()
+            default_id = str((getattr(prov, "provider_config", {}) or {}).get("id") or "")
         except Exception:
-            using_id = ""
-        providers = []
-        for p in insts:
-            try:
-                if not hasattr(p, "text_chat"):
+            default_id = ""
+        items: list[dict] = []
+        try:
+            for p in plugin.context.get_all_providers() or []:
+                cfg_p = getattr(p, "provider_config", {}) or {}
+                pid = str(cfg_p.get("id") or "")
+                if not pid or not hasattr(p, "text_chat"):
                     continue
-                pid = str(p.provider_config.get("id") or "")
-                models = []
+                name = str(
+                    cfg_p.get("provider_source_id") or cfg_p.get("name") or cfg_p.get("provider") or pid
+                )
                 try:
-                    models = [str(m) for m in (await p.get_models()) or []]
+                    model = str(p.get_model() or "")
                 except Exception:
-                    models = []
-                providers.append(
+                    model = ""
+                if not model:
+                    model = str(cfg_p.get("model") or cfg_p.get("default_model") or "")
+                label = f"{name} · {model}" if name and model and name != model else (name or model or pid)
+                items.append(
                     {
                         "id": pid,
-                        "type": str(p.provider_config.get("type") or ""),
-                        "current_model": str(p.get_model() or ""),
-                        "models": models,
+                        "name": name,
+                        "model": model,
+                        "label": label,
+                        "type": str(cfg_p.get("type") or ""),
+                        "modalities": list(cfg_p.get("modalities") or []),
+                        "is_default": bool(default_id and pid == default_id),
                     }
                 )
-            except Exception:
-                continue
-        providers.sort(key=lambda p: (p["id"] != using_id, p["id"]))
+        except Exception as e:
+            logger.warning(f"[资料卡] 读取提供商列表失败: {e}")
+        items.sort(key=lambda it: (not it["is_default"], it["label"]))
         return _ok(
             {
-                "providers": providers,
-                "using_id": using_id,
+                "items": items,
+                "default_id": default_id,
                 "selection": plugin.box.get_model_selection(),
             }
         )
@@ -324,6 +334,91 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         logger.info(f"[资料卡] 模型选择已更新: {plugin.box.get_model_selection()}")
         return _ok({"selection": plugin.box.get_model_selection()})
 
+    # ------------------------------------------------------ 插件配置读写
+    _CONFIG_FIELDS: dict[str, str] = {
+        "only_admin": "bool",
+        "protect_ids": "strlist",
+        "record_join_leave": "bool",
+        "init_backfill": "bool",
+        "cache_cooldown": "int",
+        "max_concurrent": "int",
+        "desensitize": "bool",
+        "recall_time": "int",
+        "welcome_enabled": "bool",
+        "welcome_text": "str",
+        "welcome_images": "strlist",
+        "welcome_ai_enabled": "bool",
+        "welcome_ai_prompt": "str",
+        "welcome_ai_retry": "int",
+        "welcome_private_rules": "bool",
+        "group_rules": "str",
+        "black_groups": "strlist",
+        "display_options": "strlist",
+        "autobox.enter": "bool",
+        "autobox.exit": "bool",
+        "autobox.white_groups": "strlist",
+        "ai_analysis.avatar_analysis": "bool",
+        "ai_analysis.signature_analysis": "bool",
+        "ai_analysis.overall_analysis": "bool",
+        "ai_analysis.event_analysis": "bool",
+    }
+
+    @staticmethod
+    def _coerce(value: Any, kind: str) -> Any:
+        if kind == "bool":
+            return bool(value)
+        if kind == "int":
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+        if kind == "str":
+            return str(value if value is not None else "")
+        if kind == "strlist":
+            if isinstance(value, list):
+                return [str(v).strip() for v in value if str(v).strip()]
+            return []
+        return value
+
+    async def h_config_get(*_args, **_kwargs) -> dict:
+        raw = plugin.cfg._data
+        autobox = raw.get("autobox") if isinstance(raw.get("autobox"), dict) else {}
+        ai_sub = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
+        values = {}
+        for key, kind in plugin._backfiller._CONFIG_FIELDS.items():
+            if "." in key:
+                head, leaf = key.split(".", 1)
+                node = autobox if head == "autobox" else ai_sub
+                current = node.get(leaf) if isinstance(node, dict) else None
+            else:
+                current = raw.get(key)
+            values[key] = plugin._backfiller._coerce(current, kind)
+        return _ok({"values": values})
+
+    async def h_config_set(*_args, **_kwargs) -> dict:
+        body = await _body()
+        values = body.get("values")
+        if not isinstance(values, dict):
+            return _err("缺少 values 字段")
+        fields = plugin._backfiller._CONFIG_FIELDS
+        changed = []
+        for key, value in values.items():
+            kind = fields.get(key)
+            if not kind:
+                continue  # 白名单外的键直接忽略
+            coerced = plugin._backfiller._coerce(value, kind)
+            if "." in key:
+                head, leaf = key.split(".", 1)
+                node = getattr(plugin.cfg, head)
+                setattr(node, leaf, coerced)
+            else:
+                setattr(plugin.cfg, key, coerced)
+            changed.append(key)
+        if changed:
+            plugin.cfg.save_config()
+        logger.info(f"[资料卡] 面板已更新配置: {changed}")
+        return _ok({"changed": changed})
+
     routes = [
         ("/groups", h_groups, ["GET"]),
         ("/backfill/status", h_backfill_status, ["GET"]),
@@ -332,6 +427,8 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         ("/group/members", h_group_members, ["GET"]),
         ("/llm/models", h_llm_models, ["GET"]),
         ("/llm/models/set", h_llm_models_set, ["POST"]),
+        ("/config", h_config_get, ["GET"]),
+        ("/config", h_config_set, ["POST"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

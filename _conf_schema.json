@@ -202,38 +202,38 @@
         "default": 1
     },
     "llm_models": {
-        "description": "模型配置",
+        "description": "模型配置（提供商选择）",
         "type": "object",
-        "hint": "格式：提供商ID/模型名（如 openai/gpt-4o-mini），或只填模型名用系统默认提供商；留空逐级回落。也可在「成员数据」面板的「模型」页用下拉选择器配置，两处数据互通",
+        "hint": "填提供商 ID（AstrBot 里一个提供商绑定一个模型；可选列表见「成员数据」面板的「模型」页，也可在该页用下拉选择）。优先级：各功能自选 > 兜底模型 > 系统默认",
         "items": {
             "fallback": {
-                "description": "兜底模型",
+                "description": "兜底提供商",
                 "type": "string",
-                "hint": "各功能未单独指定模型时使用；留空用系统默认模型",
+                "hint": "各功能未单独指定时使用；留空用系统默认",
                 "default": ""
             },
             "welcome": {
-                "description": "AI 欢迎语模型",
+                "description": "AI 欢迎语提供商",
                 "type": "string",
-                "hint": "留空用「兜底模型」",
+                "hint": "留空用「兜底提供商」",
                 "default": ""
             },
             "avatar": {
-                "description": "头像分析模型",
+                "description": "头像分析提供商",
                 "type": "string",
-                "hint": "留空用「兜底模型」",
+                "hint": "留空用「兜底提供商」",
                 "default": ""
             },
             "signature": {
-                "description": "签名解读模型",
+                "description": "签名解读提供商",
                 "type": "string",
-                "hint": "留空用「兜底模型」",
+                "hint": "留空用「兜底提供商」",
                 "default": ""
             },
             "overall": {
-                "description": "综合锐评模型",
+                "description": "综合锐评提供商",
                 "type": "string",
-                "hint": "留空用「兜底模型」",
+                "hint": "留空用「兜底提供商」",
                 "default": ""
             }
         }

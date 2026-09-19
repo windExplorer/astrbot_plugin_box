@@ -90,7 +90,7 @@ class BoxService:
                     for k in ("avatar", "signature", "overall"):
                         flat[k] = sub.get(f"{k}_model")
                 for k in self.MODEL_KEYS:
-                    v = str(legacy.get(k) or flat.get(k) or "").strip()
+                    v = self._norm_provider_id(legacy.get(k) or flat.get(k) or "")
                     if v:
                         setattr(m, k, v)
                 if any([m.fallback, m.welcome, m.avatar, m.signature, m.overall]):
@@ -426,35 +426,38 @@ class BoxService:
     # ------------------------------------------------------------ 欢迎语
     MODEL_KEYS = ("welcome", "avatar", "signature", "overall", "fallback")
 
+    @staticmethod
+    def _norm_provider_id(value: Any) -> str:
+        """规范化为提供商 ID：容错处理旧版「提供商/模型名」格式，取斜杠前的部分。"""
+        v = str(value or "").strip()
+        return v.split("/", 1)[0].strip() if v else ""
+
     def get_model_selection(self) -> dict[str, str]:
         m = self.cfg.llm_models
-        return {k: str(getattr(m, k, "") or "") for k in self.MODEL_KEYS}
+        return {k: self._norm_provider_id(getattr(m, k, "")) for k in self.MODEL_KEYS}
 
     def set_model_selection(self, selection: dict[str, str]) -> None:
         m = self.cfg.llm_models
         for k in self.MODEL_KEYS:
-            setattr(m, k, str(selection.get(k) or "").strip())
+            setattr(m, k, self._norm_provider_id(selection.get(k)))
         self.cfg.save_config()
 
-    def _resolve_llm(self, site_key: str) -> tuple[Any, str | None]:
-        """解析 LLM 调用目标：该功能的模型 > 兜底模型 > 系统默认。
+    def _resolve_llm(self, site_key: str):
+        """解析 LLM 调用目标：该功能选择的提供商 > 兜底提供商 > 系统默认。
 
-        模型格式：``提供商ID/模型名``（跨提供商路由）或 ``模型名``（用系统默认提供商）。
-        返回 (provider, model_name)；model_name 为 None 时用该提供商的默认模型。
+        AstrBot 里一个提供商绑定一个模型，模型选择以「提供商」为单位
+        （与 AstrBot / model_panel 口径一致）。返回 provider 实例。
         """
         context = self.cfg.context
         models = self.cfg.llm_models
-        model = str(getattr(models, site_key, "") or "").strip() or str(models.fallback or "").strip()
-        if not model:
-            return context.get_using_provider(), None
-        if "/" in model:
-            provider_id, _, model_name = model.partition("/")
-            provider = context.get_provider_by_id(provider_id)
-            if provider:
-                return provider, model_name or None
-            logger.warning(f"[资料卡] 未找到 LLM 提供商 {provider_id}，回退系统默认")
-            return context.get_using_provider(), model_name or None
-        return context.get_using_provider(), model
+        provider_id = self._norm_provider_id(getattr(models, site_key, "")) or self._norm_provider_id(models.fallback)
+        if not provider_id:
+            return context.get_using_provider()
+        provider = context.get_provider_by_id(provider_id)
+        if provider and hasattr(provider, "text_chat"):
+            return provider
+        logger.warning(f"[资料卡] 未找到 LLM 提供商 {provider_id}，回退系统默认")
+        return context.get_using_provider()
 
     async def _build_welcome(self, result: BoxResult) -> str:
         """Fill the welcome text for a join card (rendered inside the card).
@@ -485,7 +488,7 @@ class BoxService:
 
     async def _gen_welcome_ai(self, name: str, count_text: str = "") -> str:
         """Optional LLM-generated welcome line, with retries."""
-        provider, model = self._resolve_llm("welcome")
+        provider = self._resolve_llm("welcome")
         if not provider:
             return ""
         prompt = (
@@ -499,7 +502,7 @@ class BoxService:
         retries = max(0, int(self.cfg.welcome_ai_retry or 0))
         for attempt in range(retries + 1):
             try:
-                resp = await provider.text_chat(prompt=prompt, model=model)
+                resp = await provider.text_chat(prompt=prompt)
                 return (resp.completion_text or "").strip()[:100]
             except Exception as e:
                 logger.debug(f"[资料卡] AI 欢迎语第 {attempt + 1}/{retries + 1} 次生成失败: {e}")
@@ -582,8 +585,8 @@ class BoxService:
         signature = (profile.long_nick or "").strip()
         profile_text = "\n".join(display)
 
-        # (key, (provider, model), (prompt, with_image))
-        specs: list[tuple[str, tuple[Any, str | None], tuple[str, bool]]] = []
+        # (key, provider, (prompt, with_image))
+        specs: list[tuple[str, Any, tuple[str, bool]]] = []
         if ai.avatar_analysis:
             specs.append(
                 ("avatar", self._resolve_llm("avatar"),
@@ -607,23 +610,21 @@ class BoxService:
         if not specs:
             return {}
 
-        async def _run(key: str, provider_model: tuple, prompt_info: tuple[str, bool]) -> tuple[str, str]:
+        async def _run(key: str, provider: Any, prompt_info: tuple[str, bool]) -> tuple[str, str]:
             prompt, with_image = prompt_info
-            provider, model = provider_model
             if not provider:
                 return key, ""
             try:
                 response = await provider.text_chat(
                     prompt=prompt,
                     image_urls=[avatar_url] if with_image else None,
-                    model=model,
                 )
                 return key, (response.completion_text or "").strip()[:80]
             except Exception as e:
                 logger.warning(f"llm analysis [{key}] failed: {e}")
                 return key, ""
 
-        pairs = await asyncio.gather(*(_run(k, pm, pi) for k, pm, pi in specs))
+        pairs = await asyncio.gather(*(_run(k, p, pi) for k, p, pi in specs))
         return {key: text for key, text in pairs if text}
 
     async def _get_avatar(self, user_id: str) -> bytes | None:

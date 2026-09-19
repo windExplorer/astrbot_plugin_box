@@ -16,163 +16,189 @@
   .avatar-cell { display: flex; align-items: center; gap: 10px; }
   .muted { opacity: .55; font-size: 12px; }
   .field-label { font-size: 13px; margin-bottom: 4px; opacity: .8; }
-  .tip { margin-top: 10px; font-size: 13px; opacity: .75; }
+  .field { margin-bottom: 14px; }
 </style>
 </head>
 <body>
 <div id="app" v-cloak>
   <n-config-provider :theme="theme" :theme-overrides="themeOverrides" style="height:100%">
-    <n-message-provider>
-      <n-layout has-sider style="height:100%">
-        <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="190" show-trigger>
-          <div class="brand"><span class="logo">🌸</span><span v-if="!collapsed">萌萌资料卡</span></div>
-          <div class="sub" v-if="!collapsed">成员数据面板</div>
-          <n-menu :value="activePage" :options="menuOptions" @update:value="onMenuUpdate" />
-        </n-layout-sider>
-        <n-layout-content content-style="padding:20px;">
+    <n-layout has-sider style="height:100%">
+      <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="190" show-trigger>
+        <div class="brand"><span class="logo">🌸</span><span v-if="!collapsed">萌萌资料卡</span></div>
+        <div class="sub" v-if="!collapsed">成员数据面板</div>
+        <n-menu :value="activePage" :options="menuOptions" @update:value="onMenuUpdate" />
+      </n-layout-sider>
+      <n-layout-content content-style="padding:20px">
 
-          <!-- ═══════════ 概览 ═══════════ -->
-          <template v-if="activePage === 'overview'">
-            <n-h2>概览</n-h2>
-            <n-grid :x-gap="12" :y-gap="12" :cols="4">
-              <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length" /></n-card></n-gi>
-              <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers" /></n-card></n-gi>
-              <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded" /></n-card></n-gi>
-              <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded" /></n-card></n-gi>
-            </n-grid>
+        <!-- ═══════════ 概览 ═══════════ -->
+        <template v-if="activePage === 'overview'">
+          <n-h2>概览</n-h2>
+          <n-grid :x-gap="12" :y-gap="12" :cols="4">
+            <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length" /></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers" /></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded" /></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded" /></n-card></n-gi>
+          </n-grid>
 
-            <n-card title="成员资料回填" size="small" style="margin-top:16px">
-              <template #header-extra>
-                <n-tag :type="backfill.running ? 'info' : (backfill.errors ? 'error' : 'default')" size="small">
-                  {{ backfill.running ? '进行中' : (backfill.errors ? '有错误' : '空闲') }}
-                </n-tag>
-              </template>
-              <n-space vertical size="large">
-                <n-space>
-                  <n-button type="primary" :loading="backfill.running" @click="startBackfill('')">📖 一键读取全部群</n-button>
-                  <n-button :disabled="backfill.running" @click="refresh()">🔄 刷新数据</n-button>
-                  <n-button v-if="backfill.running" quaternary type="error" @click="cancelBackfill()">取消任务</n-button>
-                </n-space>
-                <n-progress
-                  type="line"
-                  :percentage="backfillPct"
-                  :status="backfill.errors ? 'error' : (backfill.running ? 'default' : 'success')"
-                  :height="12" :border-radius="6" :show-indicator="false" />
-                <n-text depth="3">
-                  <template v-if="backfill.running">
-                    正在读取：{{ backfill.current_group || '…' }}（{{ backfill.done_groups }}/{{ backfill.total_groups }} 群，已记录 {{ backfill.recorded_members }} 人）
-                  </template>
-                  <template v-else-if="backfill.finished_at">
-                    上次完成：{{ backfill.finished_at }} · {{ backfill.done_groups }}/{{ backfill.total_groups }} 群 · 记录 {{ backfill.recorded_members }} 人
-                    <template v-if="backfill.errors"> · 错误 {{ backfill.errors }}：{{ backfill.last_error }}</template>
-                  </template>
-                  <template v-else>尚未执行回填。读取后，退群/被踢卡的加群时间、在群时长、群等级、群头衔、入群排位都会更完整。</template>
-                </n-text>
+          <n-card title="成员资料回填" size="small" style="margin-top:16px">
+            <template #header-extra>
+              <n-tag :type="backfill.running ? 'info' : (backfill.errors ? 'error' : 'default')" size="small">
+                {{ backfill.running ? '进行中' : (backfill.errors ? '有错误' : '空闲') }}
+              </n-tag>
+            </template>
+            <n-space vertical size="large">
+              <n-space>
+                <n-button type="primary" :loading="backfill.running" @click="startBackfill('')">📖 一键读取全部群</n-button>
+                <n-button :disabled="backfill.running" @click="refresh()">🔄 刷新数据</n-button>
+                <n-button v-if="backfill.running" quaternary type="error" @click="cancelBackfill()">取消任务</n-button>
               </n-space>
-            </n-card>
-          </template>
-
-          <!-- ═══════════ 群数据 ═══════════ -->
-          <template v-else-if="activePage === 'groups'">
-            <n-card title="群数据" size="small">
-              <template #header-extra>
-                <n-space>
-                  <n-button size="small" :loading="backfill.running" @click="startBackfill('')">📖 读取全部群</n-button>
-                  <n-button size="small" @click="refresh()">🔄 刷新</n-button>
-                </n-space>
-              </template>
-              <n-data-table
-                :columns="groupColumns"
-                :data="groups"
-                :pagination="groupPagination"
-                :row-key="g => g.group_id"
-                :loading="loading"
-                size="small" />
-            </n-card>
-          </template>
-
-          <!-- ═══════════ 模型 ═══════════ -->
-          <template v-else-if="activePage === 'models'">
-            <n-card title="模型设置" size="small" style="margin-bottom:16px">
-              <n-space vertical size="large">
-                <n-text depth="3">
-                  优先级：各功能自选 → 兜底模型 → 系统默认（★）。下拉可搜索，也可直接输入自定义模型名后回车。
-                </n-text>
-                <n-grid :cols="2" :x-gap="14" :y-gap="14">
-                  <n-gi v-for="s in modelSelects" :key="s.key">
-                    <div class="field-label">{{ s.label }}</div>
-                    <n-select v-model:value="selection[s.key]" :options="siteModelOptions"
-                              filterable tag clearable placeholder="（跟随兜底 / 系统默认）" size="small" />
-                  </n-gi>
-                  <n-gi>
-                    <div class="field-label">兜底模型（各功能未选择时使用）</div>
-                    <n-select v-model:value="selection.fallback" :options="fallbackOptions"
-                              filterable tag clearable placeholder="（系统默认）" size="small" />
-                  </n-gi>
-                </n-grid>
-                <n-space>
-                  <n-button type="primary" :loading="savingModels" @click="saveModels()">保存模型设置</n-button>
-                  <n-button @click="loadModels()">撤销更改</n-button>
-                </n-space>
-              </n-space>
-            </n-card>
-            <n-card title="可用 LLM 模型" size="small">
-              <template #header-extra>
-                <n-button size="small" @click="loadModels()">🔄 刷新</n-button>
-              </template>
-              <n-space vertical size="large">
-                <n-text depth="3">
-                  各功能（头像分析 / 签名解读 / 综合锐评 / AI 欢迎语）的模型在上方「模型设置」中选择。
-                </n-text>
-                <n-data-table
-                  :columns="modelColumns"
-                  :data="llmProviders"
-                  :row-key="p => p.id"
-                  :loading="modelsLoading"
-                  size="small" />
-              </n-space>
-            </n-card>
-          </template>
-
-          <!-- ═══════════ 预留扩展页 ═══════════ -->
-          <template v-else>
-            <n-card :title="menuLabel" size="small">
-              <n-empty description="该页面预留扩展，敬请期待。" />
-            </n-card>
-          </template>
-        </n-layout-content>
-      </n-layout>
-
-      <!-- ═══════════ 成员详情抽屉 ═══════════ -->
-      <n-drawer v-model:show="drawerShow" :width="780" placement="right">
-        <n-drawer-content :title="drawerTitle" closable>
-          <n-space vertical size="large">
-            <n-space align="center" :wrap="false">
-              <n-select v-model:value="memberFilter" :options="filterOptions" size="small" style="width:170px" />
-              <n-button size="small" :loading="memberLoading" @click="loadMembers(currentGid)">🔄 刷新列表</n-button>
-              <n-text depth="3">{{ memberSummary }}</n-text>
+              <n-progress
+                type="line"
+                :percentage="backfillPct"
+                :status="backfill.errors ? 'error' : (backfill.running ? 'default' : 'success')"
+                :height="12" :border-radius="6" :show-indicator="false" />
+              <n-text depth="3">
+                <template v-if="backfill.running">
+                  正在读取：{{ backfill.current_group || '…' }}（{{ backfill.done_groups }}/{{ backfill.total_groups }} 群，已记录 {{ backfill.recorded_members }} 人）
+                </template>
+                <template v-else-if="backfill.finished_at">
+                  上次完成：{{ backfill.finished_at }} · {{ backfill.done_groups }}/{{ backfill.total_groups }} 群 · 记录 {{ backfill.recorded_members }} 人
+                  <template v-if="backfill.errors"> · 错误 {{ backfill.errors }}：{{ backfill.last_error }}</template>
+                </template>
+                <template v-else>尚未执行回填。读取后，退群/被踢卡的加群时间、在群时长、群等级、群头衔、入群排位都会更完整。</template>
+              </n-text>
             </n-space>
+          </n-card>
+        </template>
+
+        <!-- ═══════════ 群数据 ═══════════ -->
+        <template v-else-if="activePage === 'groups'">
+          <n-card title="群数据" size="small">
+            <template #header-extra>
+              <n-space>
+                <n-button size="small" :loading="backfill.running" @click="startBackfill('')">📖 读取全部群</n-button>
+                <n-button size="small" @click="refresh()">🔄 刷新</n-button>
+              </n-space>
+            </template>
             <n-data-table
-              :columns="memberColumns"
-              :data="filteredMembers"
-              :pagination="memberPagination"
-              :row-key="m => m.user_id"
-              :loading="memberLoading"
+              :columns="groupColumns"
+              :data="groups"
+              :pagination="groupPagination"
+              :row-key="g => g.group_id"
+              :loading="loading"
               size="small" />
+          </n-card>
+        </template>
+
+        <!-- ═══════════ 插件配置 ═══════════ -->
+        <template v-else-if="activePage === 'config'">
+          <n-card title="插件配置" size="small">
+            <template #header-extra>
+              <n-button size="small" @click="loadConfig()">🔄 重读配置</n-button>
+            </template>
+            <n-space vertical size="large">
+              <n-alert type="info" :bordered="false">
+                此处与 AstrBot 插件配置页读写同一份配置，两边修改互相可见。各 LLM 功能（头像分析等）使用的模型请在「模型」页选择。
+              </n-alert>
+              <n-card v-for="sec in configSections" :key="sec.key" :title="sec.title" size="small">
+                <n-space vertical size="large">
+                  <div v-for="f in sec.fields" :key="f.key" class="field">
+                    <div class="field-label">{{ f.label }}</div>
+                    <n-switch v-if="f.type === 'switch'"
+                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)" />
+                    <n-input-number v-else-if="f.type === 'number'"
+                                    :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
+                                    :min="f.min" :max="f.max" style="width:220px" />
+                    <n-select v-else-if="f.type === 'tags'"
+                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
+                              filterable tag multiple :options="[]"
+                              :placeholder="f.placeholder || '输入后回车添加'" />
+                    <n-select v-else-if="f.type === 'multiselect'"
+                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
+                              multiple :options="displayFieldOptions" />
+                    <n-input v-else-if="f.type === 'textarea'"
+                             :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
+                             type="textarea" :rows="3" />
+                    <n-input v-else
+                             :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)" />
+                    <div class="muted" v-if="f.hint">{{ f.hint }}</div>
+                  </div>
+                  <n-button type="primary" size="small" :loading="savingSection === sec.key"
+                            @click="saveSection(sec)">保存「{{ sec.title }}」</n-button>
+                </n-space>
+              </n-card>
+            </n-space>
+          </n-card>
+        </template>
+
+        <!-- ═══════════ 模型 ═══════════ -->
+        <template v-else-if="activePage === 'models'">
+          <n-card title="模型设置" size="small" style="margin-bottom:16px">
+            <n-space vertical size="large">
+              <n-text depth="3">
+                优先级：各功能自选 → 兜底模型 → 系统默认（★）。下拉可搜索；此设置与插件配置页的「模型配置」区块读写同一份数据。
+              </n-text>
+              <n-grid :cols="2" :x-gap="14" :y-gap="14">
+                <n-gi v-for="s in modelSelects" :key="s.key">
+                  <div class="field-label">{{ s.label }}</div>
+                  <n-select v-model:value="selection[s.key]" :options="providerOptions"
+                            filterable clearable placeholder="（跟随兜底 / 系统默认）" size="small" />
+                </n-gi>
+                <n-gi>
+                  <div class="field-label">兜底模型（各功能未选择时使用）</div>
+                  <n-select v-model:value="selection.fallback" :options="providerOptions"
+                            filterable clearable placeholder="（系统默认）" size="small" />
+                </n-gi>
+              </n-grid>
+              <n-space>
+                <n-button type="primary" :loading="savingModels" @click="saveModels()">保存模型设置</n-button>
+                <n-button @click="loadModels()">撤销更改</n-button>
+              </n-space>
+            </n-space>
+          </n-card>
+          <n-card title="可用对话模型提供商" size="small">
+            <template #header-extra>
+              <n-button size="small" @click="loadModels()">🔄 刷新</n-button>
+            </template>
+            <n-data-table
+              :columns="modelColumns"
+              :data="llmItems"
+              :row-key="p => p.id"
+              :loading="modelsLoading"
+              size="small" />
+          </n-card>
+        </template>
+      </n-layout-content>
+    </n-layout>
+
+    <!-- ═══════════ 成员详情抽屉 ═══════════ -->
+    <n-drawer v-model:show="drawerShow" :width="780" placement="right">
+      <n-drawer-content :title="drawerTitle" closable>
+        <n-space vertical size="large">
+          <n-space align="center" :wrap="false">
+            <n-select v-model:value="memberFilter" :options="filterOptions" size="small" style="width:170px" />
+            <n-button size="small" :loading="memberLoading" @click="loadMembers(currentGid)">🔄 刷新列表</n-button>
+            <n-text depth="3">{{ memberSummary }}</n-text>
           </n-space>
-        </n-drawer-content>
-      </n-drawer>
-    </n-message-provider>
+          <n-data-table
+            :columns="memberColumns"
+            :data="filteredMembers"
+            :pagination="memberPagination"
+            :row-key="m => m.user_id"
+            :loading="memberLoading"
+            size="small" />
+        </n-space>
+      </n-drawer-content>
+    </n-drawer>
   </n-config-provider>
 </div>
 
 <script>
 (function () {
   "use strict";
-  var PAGE_SIZE = 100;
-  var bridge = null; // 桥接就绪后赋值（setup 在其后才会 mount）
-  var { createApp, h, ref, computed, onMounted } = Vue;
+  var bridge = null;
   var message = naive.createDiscreteApi(["message"]).message;
+  var { createApp, h, ref, computed } = Vue;
 
   function groupAvatarUrl(gid) { return "https://p.qlogo.cn/gh/" + gid + "/" + gid + "/140"; }
   function memberAvatarUrl(uid) { return "https://q1.qlogo.cn/g?b=qq&nk=" + uid + "&s=40"; }
@@ -187,24 +213,28 @@
                   primaryColorSuppl: "#e0679c", borderRadius: "8px" }
       };
 
+      // ───────────────────────── 群数据状态 ─────────────────────────
       var loading = ref(false);
       var groups = ref([]);
       var backfill = ref({});
-      var activePage = ref("overview");
-      var collapsed = ref(false);
+      var groupPagination = { pageSize: 10 };
 
+      // ───────────────────────── 成员抽屉状态 ─────────────────────────
       var drawerShow = ref(false);
       var drawerTitle = ref("成员列表");
       var currentGid = ref("");
       var members = ref([]);
       var memberLoading = ref(false);
       var memberFilter = ref("all");
-
-      var groupPagination = { pageSize: 10 };
       var memberPagination = { pageSize: 20 };
-      var llmProviders = ref([]);
+      var filterOptions = [
+        { label: "全部成员", value: "all" },
+        { label: "仅看缺记录", value: "unrecorded" }
+      ];
+
+      // ───────────────────────── 模型状态 ─────────────────────────
+      var llmItems = ref([]);
       var modelsLoading = ref(false);
-      var usingId = ref("");
       var selection = ref({ welcome: "", avatar: "", signature: "", overall: "", fallback: "" });
       var savingModels = ref(false);
       var modelSelects = [
@@ -213,82 +243,62 @@
         { key: "signature", label: "签名解读" },
         { key: "overall", label: "综合锐评" }
       ];
-      var filterOptions = [
-        { label: "全部成员", value: "all" },
-        { label: "仅看缺记录", value: "unrecorded" }
+
+      // ───────────────────────── 插件配置状态 ─────────────────────────
+      var configData = ref({});
+      var savingSection = ref("");
+
+      var displayFieldOptions = [
+        "QQ号", "UID", "QID", "昵称", "备注", "群昵称", "群头衔", "群身份", "性别", "生日",
+        "星座", "生肖", "年龄", "血型", "电话", "邮箱", "家乡", "现居", "学校", "职位",
+        "职业", "个性标签", "风险账号", "机器人账号", "QQVIP", "年VIP", "VIP等级", "获赞",
+        "群等级", "加群时间", "最后发言", "QQ等级", "注册时间", "登录天数", "隐藏QQ等级",
+        "特权图标", "屏蔽用户", "免打扰", "特别关心", "空间特别关心", "签名"
       ];
 
-      function providerGroups() {
-        var opts = [];
-        llmProviders.value.forEach(function (p) {
-          var models = (p.models.length ? p.models : [p.current_model]).filter(Boolean);
-          if (!models.length) return;
-          opts.push({
-            type: "group", label: p.id, key: "g_" + p.id,
-            children: models.map(function (m) { return { label: p.id + "/" + m, value: p.id + "/" + m }; })
-          });
-        });
-        return opts;
-      }
-      var siteModelOptions = computed(function () {
-        return [{ label: "（跟随兜底 / 系统默认）", value: "" }].concat(providerGroups());
-      });
-      var fallbackOptions = computed(function () {
-        return [{ label: "（系统默认）", value: "" }].concat(providerGroups());
-      });
-
-      function loadModels() {
-        modelsLoading.value = true;
-        return bridge.apiGet("llm/models", { _t: Date.now() }).then(function (d) {
-          llmProviders.value = d.providers || [];
-          usingId.value = d.using_id || "";
-          selection.value = Object.assign(
-            { welcome: "", avatar: "", signature: "", overall: "", fallback: "" },
-            d.selection || {}
-          );
-        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
-          .finally(function () { modelsLoading.value = false; });
-      }
-
-      function saveModels() {
-        savingModels.value = true;
-        return bridge.apiPost("llm/models/set", { selection: selection.value })
-          .then(function () { message.success("模型设置已保存"); })
-          .catch(function (e) { message.error("保存失败：" + e.message); })
-          .finally(function () { savingModels.value = false; });
-      }
-
-      var modelColumns = [
-        { title: "提供商 ID", key: "id", width: 180, render: function (p) {
-            var star = p.id === usingId.value ? " ★" : "";
-            return h("span", { style: "font-family:monospace" }, p.id + star);
-          } },
-        { title: "类型", key: "type", width: 140 },
-        { title: "当前模型", key: "current_model", width: 200, render: function (p) {
-            return h("span", { style: "font-family:monospace" }, p.current_model || "—");
-          } },
-        { title: "可用模型", key: "models", render: function (p) {
-            if (!p.models.length) return h("span", { class: "muted" }, "（接口未提供列表）");
-            return h(NS.NSpace, { size: 4 }, {
-              default: function () {
-                return p.models.slice(0, 12).map(function (m) {
-                  return h(NS.NTag, { size: "tiny", bordered: false }, { default: function () { return m; } });
-                });
-              }
-            });
-          } }
+      var CONFIG_SECTIONS = [
+        { key: "basic", title: "基础", fields: [
+          { key: "only_admin", type: "switch", label: "仅 Bot 管理员可查询他人资料" },
+          { key: "protect_ids", type: "tags", label: "信息保护用户", placeholder: "输入 QQ 号后回车添加", hint: "查询时会忽略名单中的用户；管理员默认受保护" },
+          { key: "desensitize", type: "switch", label: "信息脱敏" },
+          { key: "record_join_leave", type: "switch", label: "记录入群/退群精确时间（本地数据库）" },
+          { key: "init_backfill", type: "switch", label: "启动时自动回填成员资料（12 小时内不重复）" },
+          { key: "cache_cooldown", type: "number", label: "资料卡缓存冷却（分钟，0 = 关闭）", min: 0, max: 720 },
+          { key: "max_concurrent", type: "number", label: "并发获取数（全局限流）", min: 1, max: 10 },
+          { key: "recall_time", type: "number", label: "撤回时间（秒，0 = 不撤回）", min: 0, max: 110 }
+        ]},
+        { key: "autobox", title: "自动展示", fields: [
+          { key: "autobox.enter", type: "switch", label: "自动展示新进群成员的资料卡" },
+          { key: "autobox.exit", type: "switch", label: "自动展示退群/被踢成员的资料卡" },
+          { key: "autobox.white_groups", type: "tags", label: "群白名单", placeholder: "输入群号后回车添加", hint: "非空时只自动展示白名单群聊" },
+          { key: "black_groups", type: "tags", label: "群黑名单", placeholder: "输入群号后回车添加", hint: "白名单为空时生效" }
+        ]},
+        { key: "welcome", title: "入群欢迎", fields: [
+          { key: "welcome_enabled", type: "switch", label: "启用入群欢迎（嵌入入群卡）" },
+          { key: "welcome_text", type: "textarea", label: "欢迎语模板", hint: "支持 {name} 与 {count_text} 占位符；AI 开启时此模板作为生成失败的回退" },
+          { key: "welcome_images", type: "tags", label: "欢迎图片池", placeholder: "输入图片链接后回车添加", hint: "http(s) 直链，支持 PNG/JPG/WebP；随机嵌入一张到入群卡" },
+          { key: "welcome_ai_enabled", type: "switch", label: "AI 欢迎语（替代固定模板）" },
+          { key: "welcome_ai_prompt", type: "textarea", label: "AI 欢迎语提示词", hint: "支持 {name} 与 {count_text} 占位符" },
+          { key: "welcome_ai_retry", type: "number", label: "AI 生成重试次数", min: 0, max: 5 },
+          { key: "welcome_private_rules", type: "switch", label: "私聊发送群规" },
+          { key: "group_rules", type: "textarea", label: "群规文本" }
+        ]},
+        { key: "ai", title: "AI 分析开关", fields: [
+          { key: "ai_analysis.avatar_analysis", type: "switch", label: "头像分析" },
+          { key: "ai_analysis.signature_analysis", type: "switch", label: "签名解读" },
+          { key: "ai_analysis.overall_analysis", type: "switch", label: "综合锐评" },
+          { key: "ai_analysis.event_analysis", type: "switch", label: "退群/被踢卡也执行 AI 分析", hint: "默认关闭；开启后按上面三个开关执行" },
+          { key: "display_options", type: "multiselect", label: "展示字段选项" }
+        ]}
       ];
 
       var menuOptions = [
         { label: "🏠 概览", key: "overview" },
         { label: "👥 群数据", key: "groups" },
+        { label: "⚙️ 插件配置", key: "config" },
         { label: "🧠 模型", key: "models" }
-        // 在此数组中追加 { label, key } 即可扩展新页面（配合下方模板分支）
+        // 扩展新页面：追加 { label, key } 并在下方模板加对应分支
       ];
-      var menuLabel = computed(function () {
-        var hit = menuOptions.find(function (o) { return o.key === activePage.value; });
-        return hit ? hit.label.replace(/^\S+\s/, "") : activePage.value;
-      });
 
       var totalMembers = computed(function () {
         return groups.value.reduce(function (s, g) { return s + (g.listed || g.member_count || 0); }, 0);
@@ -304,7 +314,6 @@
         if (!st.total_groups) return st.running ? 8 : 0;
         return Math.round((st.done_groups || 0) * 100 / st.total_groups);
       });
-
       var filteredMembers = computed(function () {
         if (memberFilter.value === "unrecorded") {
           return members.value.filter(function (m) { return !m.info_recorded || !m.join_recorded; });
@@ -322,7 +331,7 @@
         return bridge.apiGet("groups", { _t: Date.now() }).then(function (d) {
           groups.value = d.groups || [];
           backfill.value = d.backfill || {};
-        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
+        }).catch(function (e) { message.error(e.message); })
           .finally(function () { loading.value = false; });
       }
 
@@ -331,7 +340,7 @@
         memberLoading.value = true;
         return bridge.apiGet("group/members", { group_id: gid, _t: Date.now() }).then(function (d) {
           members.value = d.members || [];
-        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
+        }).catch(function (e) { message.error(e.message); })
           .finally(function () { memberLoading.value = false; });
       }
 
@@ -344,7 +353,7 @@
 
       function startBackfill(gid) {
         return bridge.apiPost("backfill", gid ? { group_id: gid } : {})
-          .then(pollOnce).catch(function (e) { window.__panelFail && window.__panelFail(e.message); });
+          .then(pollOnce).catch(function (e) { message.error(e.message); });
       }
       function cancelBackfill() {
         bridge.apiPost("backfill/cancel", {}).then(pollOnce).catch(function () {});
@@ -355,7 +364,6 @@
           var wasRunning = backfill.value.running;
           backfill.value = st;
           if (wasRunning && !st.running) {
-            // 读取刚结束：刷新统计 + 当前打开的成员抽屉
             refresh();
             if (drawerShow.value && currentGid.value) loadMembers(currentGid.value);
           }
@@ -367,6 +375,69 @@
         if (pollScheduled) return;
         pollScheduled = true;
         setTimeout(function () { pollScheduled = false; pollOnce(); }, 1500);
+      }
+
+      // ───────────────────────── 模型 ─────────────────────────
+      var providerOptions = computed(function () {
+        return llmItems.value.map(function (p) {
+          return { label: p.label + (p.is_default ? "（默认）" : ""), value: p.id };
+        });
+      });
+
+      function loadModels() {
+        modelsLoading.value = true;
+        return bridge.apiGet("llm/models", { _t: Date.now() }).then(function (d) {
+          llmItems.value = d.items || [];
+          selection.value = Object.assign(
+            { welcome: "", avatar: "", signature: "", overall: "", fallback: "" },
+            d.selection || {}
+          );
+        }).catch(function (e) { message.error(e.message); })
+          .finally(function () { modelsLoading.value = false; });
+      }
+
+      function saveModels() {
+        savingModels.value = true;
+        return bridge.apiPost("llm/models/set", { selection: selection.value })
+          .then(function () { message.success("模型设置已保存"); })
+          .catch(function (e) { message.error("保存失败：" + e.message); })
+          .finally(function () { savingModels.value = false; });
+      }
+
+      // ───────────────────────── 插件配置 ─────────────────────────
+      function loadConfig() {
+        return bridge.apiGet("config", { _t: Date.now() }).then(function (d) {
+          configData.value = d.values || {};
+        }).catch(function (e) { message.error(e.message); });
+      }
+
+      function cfgGet(path) {
+        var parts = path.split(".");
+        var node = configData.value;
+        for (var i = 0; i < parts.length; i++) {
+          if (node == null) return null;
+          node = node[parts[i]];
+        }
+        return node;
+      }
+      function cfgSet(path, v) {
+        var parts = path.split(".");
+        var node = configData.value;
+        for (var i = 0; i < parts.length - 1; i++) {
+          if (node[parts[i]] == null) node[parts[i]] = {};
+          node = node[parts[i]];
+        }
+        node[parts[parts.length - 1]] = v;
+      }
+
+      function saveSection(sec) {
+        var values = {};
+        sec.fields.forEach(function (f) { values[f.key] = cfgGet(f.key); });
+        savingSection.value = sec.key;
+        return bridge.apiPost("config", { values: values })
+          .then(function () { message.success("「" + sec.title + "」已保存"); })
+          .catch(function (e) { message.error("保存失败：" + e.message); })
+          .finally(function () { savingSection.value = ""; });
       }
 
       // ───────────────────────── 表格列 ─────────────────────────
@@ -441,27 +512,37 @@
           } }
       ];
 
+      var modelColumns = [
+        { title: "提供商", key: "label", render: function (p) {
+            return h("div", { style: "display:flex;align-items:center;gap:10px" }, [
+              h("span", { style: "font-weight:600" }, p.label),
+              p.is_default ? h(NS.NTag, { size: "tiny", type: "success", bordered: false }, { default: function () { return "系统默认"; } }) : null,
+              h("span", { class: "gid" }, p.id)
+            ]);
+          } },
+        { title: "输入模态", key: "modalities", width: 200, render: function (p) {
+            var mods = p.modalities || [];
+            if (!mods.length) return h("span", { class: "muted" }, "—");
+            return h(NS.NSpace, { size: 4 }, {
+              default: function () {
+                return mods.map(function (m) {
+                  return h(NS.NTag, { size: "tiny", bordered: false }, { default: function () { return m; } });
+                });
+              }
+            });
+          } }
+      ];
+
       function onMenuUpdate(key) {
         activePage.value = key;
-        if (key === "models" && !llmProviders.value.length) loadModels();
+        if (key === "models" && !llmItems.value.length) loadModels();
+        if (key === "config" && !Object.keys(configData.value).length) loadConfig();
       }
 
-      onMounted(function () {
-        try {
-          var ctx = window.AstrBotPluginPage && window.AstrBotPluginPage.getContext &&
-                    window.AstrBotPluginPage.getContext();
-          if (ctx && typeof ctx.isDark === "boolean") { isDark.value = ctx.isDark; return; }
-        } catch (e) { /* sandbox 下安全忽略 */ }
-        if (window.matchMedia) {
-          isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          window.matchMedia("(prefers-color-scheme: dark)").addEventListener &&
-            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) { isDark.value = e.matches; });
-        }
-      });
-
+      // ───────────────────────── 暴露给模板 ─────────────────────────
       return {
-        theme: theme, themeOverrides: themeOverrides, collapsed: collapsed,
-        activePage: activePage, menuOptions: menuOptions, menuLabel: menuLabel, onMenuUpdate: onMenuUpdate,
+        theme: theme, themeOverrides: themeOverrides,
+        activePage: activePage, menuOptions: menuOptions, onMenuUpdate: onMenuUpdate,
         loading: loading, groups: groups, totalMembers: totalMembers,
         totalInfoRecorded: totalInfoRecorded, totalJoinRecorded: totalJoinRecorded,
         backfill: backfill, backfillPct: backfillPct,
@@ -472,14 +553,16 @@
         filteredMembers: filteredMembers, memberSummary: memberSummary,
         memberColumns: memberColumns, memberPagination: memberPagination,
         memberLoading: memberLoading, currentGid: currentGid, loadMembers: loadMembers,
-        llmProviders: llmProviders, modelsLoading: modelsLoading, modelColumns: modelColumns,
+        llmItems: llmItems, modelsLoading: modelsLoading, modelColumns: modelColumns,
         selection: selection, modelSelects: modelSelects, savingModels: savingModels,
-        siteModelOptions: siteModelOptions, fallbackOptions: fallbackOptions, saveModels: saveModels
+        providerOptions: providerOptions, saveModels: saveModels, loadModels: loadModels,
+        configSections: CONFIG_SECTIONS, configData: configData,
+        cfgGet: cfgGet, cfgSet: cfgSet, saveSection: saveSection, savingSection: savingSection,
+        displayFieldOptions: displayFieldOptions
       };
     }
   };
 
-  // 暴露 bridge 给 setup 使用（等待就绪后挂到 window.__bridge）
   var bridgeReady = new Promise(function (resolve, reject) {
     var start = Date.now();
     (function poll() {
@@ -496,11 +579,10 @@
     var app = createApp(App);
     app.use(naive);
     app.mount("#app");
-    window.__panelFail = function (msg) { console.warn("[member_panel]", msg); };
   }).catch(function (e) {
     document.getElementById("app").innerHTML =
       '<div style="padding:24px;background:#fdf0e3;color:#d0722f;border-radius:12px;margin:20px;font-family:sans-serif">' +
-      e.message + '<br><br>本页面用于查看「萌萌资料卡」的成员数据，请从 AstrBot 管理面板的插件拓展页打开。</div>';
+      e.message + '<br><br>本页面用于配置和查看「萌萌资料卡」的成员数据，请从 AstrBot 管理面板的插件拓展页打开。</div>';
   });
 })();
 </script>
