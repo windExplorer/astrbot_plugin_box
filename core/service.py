@@ -1,4 +1,5 @@
 import asyncio
+import json
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -71,6 +72,22 @@ class BoxService:
         self.renderer = CardMaker()
         self.store = MemberStore(cfg.data_dir / "member_times.db")
         self._semaphore = asyncio.Semaphore(max(1, int(cfg.max_concurrent or 1)))
+        # v0.10.0 的模型文本配置迁移到面板设置（meta 表）；仅当面板从未保存过时迁移一次
+        try:
+            if not self.store.get_meta("model_selection"):
+                legacy = {
+                    "welcome": str(cfg._data.get("welcome_ai_model") or ""),
+                    "fallback": str(cfg._data.get("llm_fallback_model") or ""),
+                }
+                sub = cfg._data.get("ai_analysis")
+                if isinstance(sub, dict):
+                    for k in ("avatar", "signature", "overall"):
+                        legacy[k] = str(sub.get(f"{k}_model") or "")
+                if any(legacy.values()):
+                    self.store.set_meta("model_selection", json.dumps(legacy))
+                    logger.info("[资料卡] 已将旧版模型文本配置迁移到面板「模型设置」")
+        except Exception:
+            pass
 
     async def get_box_info(
         self,
@@ -396,16 +413,22 @@ class BoxService:
             return result
 
     # ------------------------------------------------------------ 欢迎语
-    def _resolve_llm(self, site_model: str) -> tuple[Any, str | None]:
-        """解析 LLM 调用目标：站点模型 > 兜底模型 > 系统默认。
+    def _model_sel(self, key: str) -> str:
+        """读取面板「模型设置」里的选择（meta 表 model_selection JSON）。"""
+        try:
+            sel = json.loads(self.store.get_meta("model_selection") or "{}")
+        except Exception:
+            sel = {}
+        return str(sel.get(key) or "").strip()
+
+    def _resolve_llm(self, site_key: str) -> tuple[Any, str | None]:
+        """解析 LLM 调用目标：该功能的选择 > 兜底模型 > 系统默认。
 
         模型格式：``提供商ID/模型名``（跨提供商路由）或 ``模型名``（用系统默认提供商）。
         返回 (provider, model_name)；model_name 为 None 时用该提供商的默认模型。
         """
         context = self.cfg.context
-        model = (site_model or "").strip()
-        if not model:
-            model = (self.cfg.llm_fallback_model or "").strip()
+        model = self._model_sel(site_key) or self._model_sel("fallback")
         if not model:
             return context.get_using_provider(), None
         if "/" in model:
@@ -446,7 +469,7 @@ class BoxService:
 
     async def _gen_welcome_ai(self, name: str, count_text: str = "") -> str:
         """Optional LLM-generated welcome line, with retries."""
-        provider, model = self._resolve_llm(self.cfg.welcome_ai_model)
+        provider, model = self._resolve_llm("welcome")
         if not provider:
             return ""
         prompt = (
@@ -547,19 +570,19 @@ class BoxService:
         specs: list[tuple[str, tuple[Any, str | None], tuple[str, bool]]] = []
         if ai.avatar_analysis:
             specs.append(
-                ("avatar", self._resolve_llm(ai.avatar_model),
+                ("avatar", self._resolve_llm("avatar"),
                  ("这是一位QQ用户的头像图片。请根据头像画面，用轻松幽默的语气写一句话点评这位用户，"
                   "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", True))
             )
         if ai.signature_analysis and signature:
             specs.append(
-                ("signature", self._resolve_llm(ai.signature_model),
+                ("signature", self._resolve_llm("signature"),
                  (f"一位QQ用户的个性签名是：「{signature}」。请据此用轻松幽默的语气写一句话点评这位用户，"
                   "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", False))
             )
         if ai.overall_analysis:
             specs.append(
-                ("overall", self._resolve_llm(ai.overall_model),
+                ("overall", self._resolve_llm("overall"),
                  ("这是一位QQ用户的头像图片和公开资料：\n"
                   f"{profile_text}\n"
                   "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"

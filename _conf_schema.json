@@ -147,35 +147,17 @@
                 "hint": "让 LLM 看头像并写一句点评",
                 "default": false
             },
-            "avatar_model": {
-                "description": "头像分析模型",
-                "type": "string",
-                "hint": "格式：提供商ID/模型名；留空用「LLM 兜底模型」",
-                "default": ""
-            },
             "signature_analysis": {
                 "description": "签名解读",
                 "type": "bool",
                 "hint": "让 LLM 解读个性签名（对方没写签名时不展示）",
                 "default": false
             },
-            "signature_model": {
-                "description": "签名解读模型",
-                "type": "string",
-                "hint": "格式：提供商ID/模型名；留空用「LLM 兜底模型」",
-                "default": ""
-            },
             "overall_analysis": {
                 "description": "综合锐评",
                 "type": "bool",
                 "hint": "让 LLM 整合全部资料和头像写一句锐评",
                 "default": false
-            },
-            "overall_model": {
-                "description": "综合锐评模型",
-                "type": "string",
-                "hint": "格式：提供商ID/模型名；留空用「LLM 兜底模型」",
-                "default": ""
             },
             "event_analysis": {
                 "description": "退群/被踢卡 AI 分析",
@@ -219,12 +201,6 @@
         },
         "default": 1
     },
-    "llm_fallback_model": {
-        "description": "LLM 兜底模型",
-        "type": "string",
-        "hint": "各处未单独指定模型时的兜底。格式：提供商ID/模型名（如 openai/gpt-4o-mini，提供商ID即配置里的 id）；只填模型名则用系统默认提供商；留空用系统默认模型",
-        "default": ""
-    },
     "welcome_enabled": {
         "description": "入群欢迎语",
         "type": "bool",
@@ -248,12 +224,6 @@
         "type": "bool",
         "hint": "开启后欢迎语正文由 LLM 生成，替代固定模板（排位信息行保留）；生成失败时回退固定模板",
         "default": false
-    },
-    "welcome_ai_model": {
-        "description": "AI 欢迎语模型",
-        "type": "string",
-        "hint": "格式：提供商ID/模型名；只填模型名用系统默认提供商；留空用「LLM 兜底模型」",
-        "default": ""
     },
     "welcome_ai_prompt": {
         "description": "AI 欢迎语提示词",

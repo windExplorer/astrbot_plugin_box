@@ -99,11 +99,8 @@ class AutoBoxConfig(ConfigNode):
 
 class AIAnalysisConfig(ConfigNode):
     avatar_analysis: bool
-    avatar_model: str
     signature_analysis: bool
-    signature_model: str
     overall_analysis: bool
-    overall_model: str
     event_analysis: bool
 
 
@@ -124,12 +121,10 @@ class PluginConfig(ConfigNode):
     welcome_images: list
     welcome_ai_enabled: bool
     welcome_ai_prompt: str
-    welcome_ai_model: str
     welcome_ai_retry: int
     welcome_private_rules: bool
     group_rules: str
     black_groups: list
-    llm_fallback_model: str
     mystery_url: str
     mystery_cookies: str
 

@@ -83,6 +83,19 @@ class MemberBackfiller:
             "finished_at": "",
         }
 
+    MODEL_KEYS = ("welcome", "avatar", "signature", "overall", "fallback")
+
+    def _selection(self) -> dict[str, str]:
+        try:
+            sel = json.loads(self.store.get_meta("model_selection") or "{}")
+        except Exception:
+            sel = {}
+        return {k: str(sel.get(k) or "") for k in self.MODEL_KEYS}
+
+    def set_selection(self, selection: dict[str, str]) -> None:
+        clean = {k: str(selection.get(k) or "").strip() for k in self.MODEL_KEYS}
+        self.store.set_meta("model_selection", json.dumps(clean, ensure_ascii=False))
+
     def status(self) -> dict[str, Any]:
         return dict(self.state)
 
@@ -269,7 +282,7 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         return _ok({"group_id": gid, "total": len(out), "unrecorded": unrecorded, "members": out})
 
     async def h_llm_models(*_args, **_kwargs) -> dict:
-        """枚举可用的 LLM 提供商与模型，供面板填写「提供商ID/模型名」时参考。"""
+        """枚举可用的 LLM 提供商与模型 + 当前的模型选择，供面板「模型设置」使用。"""
         try:
             insts = plugin.context.provider_manager.get_insts() or []
         except Exception as e:
@@ -302,7 +315,22 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
             except Exception:
                 continue
         providers.sort(key=lambda p: (p["id"] != using_id, p["id"]))
-        return _ok({"providers": providers, "using_id": using_id})
+        return _ok(
+            {
+                "providers": providers,
+                "using_id": using_id,
+                "selection": backfiller.selection(),
+            }
+        )
+
+    async def h_llm_models_set(*_args, **_kwargs) -> dict:
+        body = await _body()
+        selection = body.get("selection")
+        if not isinstance(selection, dict):
+            return _err("缺少 selection 字段")
+        backfiller.set_selection(selection)
+        logger.info(f"[资料卡] 模型选择已更新: {backfiller.selection()}")
+        return _ok({"selection": backfiller.selection()})
 
     routes = [
         ("/groups", h_groups, ["GET"]),
@@ -311,6 +339,7 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         ("/backfill/cancel", h_backfill_cancel, ["POST"]),
         ("/group/members", h_group_members, ["GET"]),
         ("/llm/models", h_llm_models, ["GET"]),
+        ("/llm/models/set", h_llm_models_set, ["POST"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

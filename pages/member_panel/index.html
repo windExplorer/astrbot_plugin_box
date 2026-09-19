@@ -15,6 +15,7 @@
   .gid { opacity: .5; font-size: 12px; }
   .avatar-cell { display: flex; align-items: center; gap: 10px; }
   .muted { opacity: .55; font-size: 12px; }
+  .field-label { font-size: 13px; margin-bottom: 4px; opacity: .8; }
   .tip { margin-top: 10px; font-size: 13px; opacity: .75; }
 </style>
 </head>
@@ -92,14 +93,36 @@
 
           <!-- ═══════════ 模型 ═══════════ -->
           <template v-else-if="activePage === 'models'">
+            <n-card title="模型设置" size="small" style="margin-bottom:16px">
+              <n-space vertical size="large">
+                <n-text depth="3">
+                  优先级：各功能自选 → 兜底模型 → 系统默认（★）。下拉可搜索，也可直接输入自定义模型名后回车。
+                </n-text>
+                <n-grid :cols="2" :x-gap="14" :y-gap="14">
+                  <n-gi v-for="s in modelSelects" :key="s.key">
+                    <div class="field-label">{{ s.label }}</div>
+                    <n-select v-model:value="selection[s.key]" :options="siteModelOptions"
+                              filterable tag clearable placeholder="（跟随兜底 / 系统默认）" size="small" />
+                  </n-gi>
+                  <n-gi>
+                    <div class="field-label">兜底模型（各功能未选择时使用）</div>
+                    <n-select v-model:value="selection.fallback" :options="fallbackOptions"
+                              filterable tag clearable placeholder="（系统默认）" size="small" />
+                  </n-gi>
+                </n-grid>
+                <n-space>
+                  <n-button type="primary" :loading="savingModels" @click="saveModels()">保存模型设置</n-button>
+                  <n-button @click="loadModels()">撤销更改</n-button>
+                </n-space>
+              </n-space>
+            </n-card>
             <n-card title="可用 LLM 模型" size="small">
               <template #header-extra>
                 <n-button size="small" @click="loadModels()">🔄 刷新</n-button>
               </template>
               <n-space vertical size="large">
                 <n-text depth="3">
-                  各功能（头像分析 / 签名解读 / 综合锐评 / AI 欢迎语）的模型在<b>插件配置页</b>填写，格式
-                  <b>提供商ID/模型名</b>（如 openai/gpt-4o-mini）。优先级：各自模型 → 兜底模型（llm_fallback_model）→ 系统默认。
+                  各功能（头像分析 / 签名解读 / 综合锐评 / AI 欢迎语）的模型在上方「模型设置」中选择。
                 </n-text>
                 <n-data-table
                   :columns="modelColumns"
@@ -149,6 +172,7 @@
   var PAGE_SIZE = 100;
   var bridge = null; // 桥接就绪后赋值（setup 在其后才会 mount）
   var { createApp, h, ref, computed, onMounted } = Vue;
+  var message = naive.createDiscreteApi(["message"]).message;
 
   function groupAvatarUrl(gid) { return "https://p.qlogo.cn/gh/" + gid + "/" + gid + "/140"; }
   function memberAvatarUrl(uid) { return "https://q1.qlogo.cn/g?b=qq&nk=" + uid + "&s=40"; }
@@ -181,18 +205,57 @@
       var llmProviders = ref([]);
       var modelsLoading = ref(false);
       var usingId = ref("");
+      var selection = ref({ welcome: "", avatar: "", signature: "", overall: "", fallback: "" });
+      var savingModels = ref(false);
+      var modelSelects = [
+        { key: "welcome", label: "AI 欢迎语" },
+        { key: "avatar", label: "头像分析" },
+        { key: "signature", label: "签名解读" },
+        { key: "overall", label: "综合锐评" }
+      ];
       var filterOptions = [
         { label: "全部成员", value: "all" },
         { label: "仅看缺记录", value: "unrecorded" }
       ];
+
+      function providerGroups() {
+        var opts = [];
+        llmProviders.value.forEach(function (p) {
+          var models = (p.models.length ? p.models : [p.current_model]).filter(Boolean);
+          if (!models.length) return;
+          opts.push({
+            type: "group", label: p.id, key: "g_" + p.id,
+            children: models.map(function (m) { return { label: p.id + "/" + m, value: p.id + "/" + m }; })
+          });
+        });
+        return opts;
+      }
+      var siteModelOptions = computed(function () {
+        return [{ label: "（跟随兜底 / 系统默认）", value: "" }].concat(providerGroups());
+      });
+      var fallbackOptions = computed(function () {
+        return [{ label: "（系统默认）", value: "" }].concat(providerGroups());
+      });
 
       function loadModels() {
         modelsLoading.value = true;
         return bridge.apiGet("llm/models", { _t: Date.now() }).then(function (d) {
           llmProviders.value = d.providers || [];
           usingId.value = d.using_id || "";
+          selection.value = Object.assign(
+            { welcome: "", avatar: "", signature: "", overall: "", fallback: "" },
+            d.selection || {}
+          );
         }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
           .finally(function () { modelsLoading.value = false; });
+      }
+
+      function saveModels() {
+        savingModels.value = true;
+        return bridge.apiPost("llm/models/set", { selection: selection.value })
+          .then(function () { message.success("模型设置已保存"); })
+          .catch(function (e) { message.error("保存失败：" + e.message); })
+          .finally(function () { savingModels.value = false; });
       }
 
       var modelColumns = [
@@ -409,7 +472,9 @@
         filteredMembers: filteredMembers, memberSummary: memberSummary,
         memberColumns: memberColumns, memberPagination: memberPagination,
         memberLoading: memberLoading, currentGid: currentGid, loadMembers: loadMembers,
-        llmProviders: llmProviders, modelsLoading: modelsLoading, modelColumns: modelColumns
+        llmProviders: llmProviders, modelsLoading: modelsLoading, modelColumns: modelColumns,
+        selection: selection, modelSelects: modelSelects, savingModels: savingModels,
+        siteModelOptions: siteModelOptions, fallbackOptions: fallbackOptions, saveModels: saveModels
       };
     }
   };
