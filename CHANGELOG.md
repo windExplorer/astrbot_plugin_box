@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.7.3
+
+修复旧配置存档缺键导致的崩溃（v0.7.1 引入的 `welcome_images` 未在 `PluginConfig` 声明，入群事件触发即报 `AttributeError: welcome_images`）。
+
+Bug Fixes：
+
+- `PluginConfig` 补声明 `welcome_images` 字段。
+- 新增 `ConfigNode._fill_schema_defaults()`：插件加载时读取 `_conf_schema.json`，把用户存档中**缺失的配置键按 schema 默认值补齐**（含嵌套 object：整键缺失先补空字典再填子键，`ai_analysis` / `autobox` 均覆盖），补齐后写回存档。此前从 v0.5.0 及更早版本直升的用户还会在 `ai_analysis` 上遇到同类崩溃，一并解决。
+
 ## v0.7.2
 
 确认欢迎图片池支持 WebP，配置说明补齐。

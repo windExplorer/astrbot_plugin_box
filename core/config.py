@@ -1,6 +1,7 @@
 # config.py
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from types import MappingProxyType, UnionType
@@ -116,6 +117,7 @@ class PluginConfig(ConfigNode):
     max_concurrent: int
     welcome_enabled: bool
     welcome_text: str
+    welcome_images: list
     welcome_ai_enabled: bool
     welcome_ai_prompt: str
     welcome_ai_retry: int
@@ -134,7 +136,46 @@ class PluginConfig(ConfigNode):
         self.temp_dir = Path(get_astrbot_temp_path()) / self._plugin_name / "box_cards"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
+        self._fill_schema_defaults()
         self._normalize_protect_ids()
+
+    def _fill_schema_defaults(self) -> None:
+        """旧版本保存的配置可能缺少新增键（AstrBot 不一定合并）：按 _conf_schema.json 的 default 补齐。
+
+        否则新增配置在旧存档上读取为 None 甚至 AttributeError（未声明字段）。
+        """
+        try:
+            schema_path = Path(__file__).resolve().parent.parent / "_conf_schema.json"
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"[config:{self.__class__.__name__}] 读取 _conf_schema.json 失败: {e}")
+            return
+
+        changed = False
+        for key, item in schema.items():
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "object":
+                sub = self._data.get(key)
+                if not isinstance(sub, MutableMapping):
+                    default = item.get("default")
+                    sub = dict(default) if isinstance(default, MutableMapping) else {}
+                    self._data[key] = sub
+                    changed = True
+                if isinstance(item.get("items"), dict):
+                    for sub_key, sub_item in item["items"].items():
+                        if isinstance(sub_item, dict) and sub_key not in sub and "default" in sub_item:
+                            sub[sub_key] = sub_item["default"]
+                            changed = True
+            elif key not in self._data and "default" in item:
+                self._data[key] = item["default"]
+                changed = True
+        if changed:
+            logger.info(f"[config:{self.__class__.__name__}] 已按 schema 补齐缺失的配置键")
+            try:
+                self.save_config()
+            except Exception:
+                pass
 
     def _normalize_protect_ids(self):
         if not self.admins_id:
