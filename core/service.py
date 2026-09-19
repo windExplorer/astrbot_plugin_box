@@ -396,30 +396,43 @@ class BoxService:
 
     # ------------------------------------------------------------ 欢迎语
     async def _build_welcome(self, result: BoxResult) -> str:
-        """Fill the welcome template for a join card (rendered inside the card)."""
-        template = str(self.cfg.welcome_text or "").strip() or "🎉 欢迎 {name} 加入本群！\n{count_text}"
+        """Fill the welcome text for a join card (rendered inside the card).
+
+        AI 开启时正文由 LLM 生成（替代固定模板，避免两者重复堆叠），
+        排位信息行保留；AI 失败时回退固定模板。
+        """
+        name = result.display_name or "新朋友"
         count_text = ""
         if result.join_pos:
             count_text = f"你是本群第 {result.join_pos} 位成员（共 {result.join_total} 人）"
-        name = result.display_name or "新朋友"
+
+        if self.cfg.welcome_ai_enabled:
+            ai_text = await self._gen_welcome_ai(name, count_text)
+            if ai_text:
+                parts = ([count_text] if count_text else []) + [f"✨ {ai_text}"]
+                return "\n".join(parts)
+            # AI 生成失败 → 回退固定模板
+
+        template = str(self.cfg.welcome_text or "").strip() or "🎉 欢迎 {name} 加入本群！\n{count_text}"
         try:
             text = template.format(name=name, count_text=count_text)
         except Exception as e:
             logger.warning(f"[资料卡] 欢迎语模板格式错误: {e}")
             text = f"🎉 欢迎 {name} 加入本群！"
         text = "\n".join(line for line in text.splitlines() if line.strip())
-        if self.cfg.welcome_ai_enabled:
-            ai_text = await self._gen_welcome_ai(name)
-            if ai_text:
-                text += f"\n✨ {ai_text}"
         return text
 
-    async def _gen_welcome_ai(self, name: str) -> str:
+    async def _gen_welcome_ai(self, name: str, count_text: str = "") -> str:
         """Optional LLM-generated welcome line, with retries."""
         provider = self.cfg.context.get_using_provider()
         if not provider:
             return ""
-        prompt = str(self.cfg.welcome_ai_prompt or "").replace("{name}", name).strip()
+        prompt = (
+            str(self.cfg.welcome_ai_prompt or "")
+            .replace("{name}", name)
+            .replace("{count_text}", count_text)
+            .strip()
+        )
         if not prompt:
             return ""
         retries = max(0, int(self.cfg.welcome_ai_retry or 0))

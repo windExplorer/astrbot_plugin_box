@@ -222,13 +222,13 @@
     "welcome_ai_enabled": {
         "description": "AI 欢迎语",
         "type": "bool",
-        "hint": "开启后在欢迎语后追加一句 LLM 生成的个性化欢迎语（消耗 token）",
+        "hint": "开启后欢迎语正文由 LLM 生成，替代固定模板（排位信息行保留）；生成失败时回退固定模板",
         "default": false
     },
     "welcome_ai_prompt": {
         "description": "AI 欢迎语提示词",
         "type": "string",
-        "hint": "{name} 会替换为新成员昵称",
+        "hint": "支持 {name}（新成员昵称）与 {count_text}（排位信息）占位符",
         "default": "请根据以下昵称，生成一句简短、温暖、有趣的入群欢迎语：{name}"
     },
     "welcome_ai_retry": {
