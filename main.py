@@ -153,12 +153,16 @@ class BoxPlugin(Star):
             return
 
         is_enter = raw.get("notice_type") == "group_increase"
-        is_exit = (
+        is_leave = (
             raw.get("notice_type") == "group_decrease"
             and raw.get("sub_type") == "leave"
         )
+        is_kick = (
+            raw.get("notice_type") == "group_decrease"
+            and raw.get("sub_type") == "kick"
+        )
 
-        if not (is_enter or is_exit):
+        if not (is_enter or is_leave or is_kick):
             return
 
         group_id = str(raw.get("group_id"))
@@ -176,7 +180,8 @@ class BoxPlugin(Star):
                 logger.warning(f"[资料卡] 记录入退群时间失败: {e}")
 
         if not (
-            (is_enter and self.cfg.autobox.enter) or (is_exit and self.cfg.autobox.exit)
+            (is_enter and self.cfg.autobox.enter)
+            or ((is_leave or is_kick) and self.cfg.autobox.exit)
         ):
             return
 
@@ -193,7 +198,9 @@ class BoxPlugin(Star):
             event.bot,
             user_id,
             group_id,
-            include_library=is_exit,
+            include_library=is_leave or is_kick,
+            card_type="join" if is_enter else ("kick" if is_kick else "leave"),
+            operator_id=str(raw.get("operator_id") or "") if is_kick else "",
         )
 
         if not result.is_fail():

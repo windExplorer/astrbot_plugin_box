@@ -40,6 +40,7 @@ class BoxResult:
     level_text: str = ""
     join_rank: str = ""
     analyses: dict[str, str] = field(default_factory=dict)
+    card_type: str = ""  # "" 查询 / "join" 入群 / "leave" 退群 / "kick" 被踢
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -66,6 +67,8 @@ class BoxService:
         target_id: str,
         group_id: str,
         include_library: bool = False,
+        card_type: str = "",
+        operator_id: str = "",
     ) -> BoxResult:
         """Query profile data and build a box result.
 
@@ -74,6 +77,8 @@ class BoxService:
             target_id: Target QQ user ID.
             group_id: Source QQ group ID.
             include_library: Whether to append library data.
+            card_type: "" / "join" / "leave" / "kick" — controls extra rows.
+            operator_id: For kick cards, the admin who performed the kick.
 
         Returns:
             Box query result.
@@ -151,6 +156,9 @@ class BoxService:
 
         # 入群/退群精确时间：优先使用本地数据库记录（退群成员接口查不到，只能靠库）
         show_join = "join_time" in enabled or "加群时间" in enabled
+        force_times = card_type in ("leave", "kick")
+        db_join = ""
+        db_leave = ""
         if group_id and self.cfg.record_join_leave:
             try:
                 if member_info.get("join_time"):
@@ -160,27 +168,50 @@ class BoxService:
                         datetime.fromtimestamp(int(member_info["join_time"])),
                     )
                 record = self.store.get(group_id, target_id)
-                db_join = record[0] if record else ""
-                db_leave = record[1] if record else ""
-                if db_join and show_join:
-                    replaced = False
-                    for i, line in enumerate(display):
-                        if line.startswith("加群时间："):
-                            display[i] = f"加群时间：{db_join}{join_days_suffix(member_info.get('join_time'))}"
-                            replaced = True
-                            break
-                    if not replaced and not member_info:
-                        display.append(f"加群时间：{db_join}")
-                if db_leave and not member_info:
-                    display.append(f"退群时间：{db_leave}")
+                if record:
+                    db_join, db_leave = record
             except Exception as e:
                 logger.warning(f"[资料卡] 读取本地时间库失败: {e}")
+
+        if db_join and (show_join or force_times):
+            # 入群卡上「已入群 0 天」没有意义，只有查询/退群卡带天数后缀
+            days_txt = "" if card_type == "join" else join_days_suffix(member_info.get("join_time"))
+            replaced = False
+            for i, line in enumerate(display):
+                if line.startswith("加群时间："):
+                    display[i] = f"加群时间：{db_join}{days_txt}"
+                    replaced = True
+                    break
+            if not replaced and not member_info:
+                display.append(f"加群时间：{db_join}")
+        if db_leave and not member_info:
+            display.append(f"退群时间：{db_leave}")
+        if force_times and db_join and db_leave:
+            try:
+                join_dt = datetime.strptime(db_join, "%Y-%m-%d %H:%M:%S")
+                leave_dt = datetime.strptime(db_leave, "%Y-%m-%d %H:%M:%S")
+                display.append(f"在群时长：{max((leave_dt - join_dt).days, 0)} 天")
+            except ValueError:
+                pass
+        if card_type == "kick" and operator_id:
+            operator_name = ""
+            try:
+                op_info = await bot.get_stranger_info(user_id=int(operator_id))
+                operator_name = str((op_info or {}).get("nickname") or "")
+            except Exception:
+                operator_name = ""
+            display.append(
+                f"操作管理员：{operator_name}（{operator_id}）"
+                if operator_name
+                else f"操作管理员：{operator_id}"
+            )
 
         result = BoxResult(
             target_id=target_id,
             group_id=group_id,
             display=display,
             level_text=level_text,
+            card_type=card_type,
         )
 
         if group_id:

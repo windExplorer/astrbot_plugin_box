@@ -28,8 +28,9 @@
                 "default": false
             },
             "exit": {
-                "description": "自动展示主动退群成员的资料卡",
+                "description": "自动展示退群/被踢成员的资料卡",
                 "type": "bool",
+                "hint": "主动退群和被管理员/群主踢出都会触发，卡片会区分显示",
                 "default": false
             }
         }

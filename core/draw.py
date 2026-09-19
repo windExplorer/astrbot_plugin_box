@@ -341,7 +341,7 @@ class CardMaker:
                 x += font.getlength(run)
 
     # ------------------------------------------------------------ rows
-    _EXTRA_LABELS = frozenset({"退群时间"})  # service-appended rows outside FIELD_LABELS
+    _EXTRA_LABELS = frozenset({"退群时间", "在群时长", "操作管理员"})  # service-appended rows outside FIELD_LABELS
 
     @staticmethod
     def _parse_rows(lines: list[str]) -> list[list]:
@@ -365,6 +365,21 @@ class CardMaker:
         return rows
 
     # ------------------------------------------------------------ card
+    _CARD_TYPE_CHIPS = {
+        "join": ("新朋友", (205, 240, 216), (56, 128, 92)),
+        "leave": ("已退群", (226, 222, 240), (110, 98, 146)),
+        "kick": ("被踢出群", (255, 212, 212), (190, 72, 72)),
+    }
+
+    def _chip_metrics(self, card_type: str) -> tuple[str, int, int, tuple, tuple] | None:
+        """Header corner chip for event cards: (text, width, height, bg, fg) or None."""
+        chip = self._CARD_TYPE_CHIPS.get(card_type)
+        if not chip:
+            return None
+        text, bg, fg = chip
+        font = self._font(FOOTER_SIZE)
+        return text, int(self._measure(text, font)) + 26, sum(font.getmetrics()) + 12, bg, fg
+
     def create(
         self,
         avatar: bytes,
@@ -373,6 +388,7 @@ class CardMaker:
         join_rank: str = "",
         analyses: dict[str, str] | None = None,
         fetched_at: datetime | None = None,
+        card_type: str = "",
     ) -> bytes:
         """Create a profile card PNG.
 
@@ -383,6 +399,7 @@ class CardMaker:
             join_rank: Optional join-order text, e.g. "第 12 位 · 共 345 人".
             analyses: Optional AI comments keyed "avatar" / "signature" / "overall".
             fetched_at: When the profile data was fetched (shown in the footer).
+            card_type: "" / "join" / "leave" / "kick" — draws the header corner chip.
 
         Returns:
             Rendered PNG bytes.
@@ -404,7 +421,7 @@ class CardMaker:
         if len(blocks) > 1:
             analysis_h += ROW_GAP * (len(blocks) - 1)
 
-        header_h = self._header_height(title, level, sig)
+        header_h = self._header_height(title, level, sig, card_type)
         card_h = header_h + analysis_h + body_h + FOOTER_H
         shadow_pad = 52
         canvas_w = CARD_W + shadow_pad * 2
@@ -432,7 +449,7 @@ class CardMaker:
 
         draw = ImageDraw.Draw(img)
         avatar_img = self._load_avatar(avatar)
-        self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h)
+        self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h, card_type)
 
         y = oy + header_h + BODY_TOP_PAD
         for block_label, block_text in blocks:
@@ -537,11 +554,13 @@ class CardMaker:
             "total": 18 + pill_w + gap + rest_w,
         }
 
-    def _fit_title(self, title: str, level: str) -> tuple[ImageFont.FreeTypeFont, str]:
-        """Pick the largest title font (then truncate) that leaves room for the level badge."""
+    def _fit_title(self, title: str, level: str, card_type: str = "") -> tuple[ImageFont.FreeTypeFont, str]:
+        """Pick the largest title font (then truncate) that leaves room for the level badge and chip."""
         text_x = PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
-        title_max = avail - (self._level_metrics(level)["total"] if level else 0)
+        chip = self._chip_metrics(card_type)
+        reserve = (self._level_metrics(level)["total"] if level else 0) + (chip[1] + 16 if chip else 0)
+        title_max = avail - reserve
         size = TITLE_SIZE
         while size > 40:
             if self._measure(title, self._font(size)) <= title_max:
@@ -552,10 +571,10 @@ class CardMaker:
             title = self._truncate(title, font, title_max)
         return font, title
 
-    def _header_height(self, title: str, level: str, sig: str) -> int:
+    def _header_height(self, title: str, level: str, sig: str, card_type: str = "") -> int:
         text_x = PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
-        title_font, _ = self._fit_title(title, level)
+        title_font, _ = self._fit_title(title, level, card_type)
         title_h = sum(title_font.getmetrics())
         h = HEADER_TOP_PAD + title_h + 8 + sum(self._font(SUBTITLE_SIZE).getmetrics()) + 6
         if sig:
@@ -649,6 +668,7 @@ class CardMaker:
         level: str,
         sig: str,
         header_h: int,
+        card_type: str = "",
     ) -> None:
         # avatar with white ring, vertically centered
         ax = ox + PAD + AVATAR_D / 2
@@ -663,7 +683,7 @@ class CardMaker:
         avail = CARD_W - PAD - text_x - 40
 
         # title line: nickname + level badge
-        title_font, title = self._fit_title(title, level)
+        title_font, title = self._fit_title(title, level, card_type)
         title_h = sum(title_font.getmetrics())
         title_y = oy + HEADER_TOP_PAD
         self._draw_mixed(img, draw, (text_x, title_y), title, title_font, (*TITLE_COLOR, 255))
@@ -709,9 +729,24 @@ class CardMaker:
                     sig_font, (*SIGN_COLOR, 255),
                 )
 
-        # subtle decorations
+        # corner chip for event cards, or the subtle sparkle on normal cards
         sdraw = ImageDraw.Draw(img)
-        _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
+        chip = self._chip_metrics(card_type)
+        if chip:
+            chip_text, chip_w, chip_h, chip_bg, chip_fg = chip
+            chip_x = CARD_W - PAD - chip_w
+            chip_y = 36
+            sdraw.rounded_rectangle(
+                [ox + chip_x, oy + chip_y, ox + chip_x + chip_w, oy + chip_y + chip_h],
+                chip_h / 2,
+                fill=(*chip_bg, 255),
+            )
+            sdraw.text(
+                (ox + chip_x + 13, oy + chip_y + 6), chip_text,
+                font=self._font(FOOTER_SIZE), fill=(*chip_fg, 255),
+            )
+        else:
+            _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
 
     _ANALYSIS_LABELS = (
         ("avatar", "头像印象 · AI"),
