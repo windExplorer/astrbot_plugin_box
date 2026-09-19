@@ -26,7 +26,7 @@
       <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="190" show-trigger>
         <div class="brand"><span class="logo">🌸</span><span v-if="!collapsed">萌萌资料卡</span></div>
         <div class="sub" v-if="!collapsed">成员数据面板</div>
-        <n-menu :value="activePage" :options="menuOptions" @update:value="onMenuUpdate" />
+        <n-menu :value="activePage" :options="menuOptions" @update:value="onMenuUpdate"></n-menu>
       </n-layout-sider>
       <n-layout-content content-style="padding:20px">
 
@@ -34,10 +34,10 @@
         <template v-if="activePage === 'overview'">
           <n-h2>概览</n-h2>
           <n-grid :x-gap="12" :y-gap="12" :cols="4">
-            <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length" /></n-card></n-gi>
-            <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers" /></n-card></n-gi>
-            <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded" /></n-card></n-gi>
-            <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded" /></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length"></n-statistic></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers"></n-statistic></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded"></n-statistic></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded"></n-statistic></n-card></n-gi>
           </n-grid>
 
           <n-card title="成员资料回填" size="small" style="margin-top:16px">
@@ -56,7 +56,7 @@
                 type="line"
                 :percentage="backfillPct"
                 :status="backfill.errors ? 'error' : (backfill.running ? 'default' : 'success')"
-                :height="12" :border-radius="6" :show-indicator="false" />
+                :height="12" :border-radius="6" :show-indicator="false"></n-progress>
               <n-text depth="3">
                 <template v-if="backfill.running">
                   正在读取：{{ backfill.current_group || '…' }}（{{ backfill.done_groups }}/{{ backfill.total_groups }} 群，已记录 {{ backfill.recorded_members }} 人）
@@ -86,7 +86,7 @@
               :pagination="groupPagination"
               :row-key="g => g.group_id"
               :loading="loading"
-              size="small" />
+              size="small"></n-data-table>
           </n-card>
         </template>
 
@@ -105,10 +105,10 @@
                   <div v-for="f in sec.fields" :key="f.key" class="field">
                     <div class="field-label">{{ f.label }}</div>
                     <n-switch v-if="f.type === 'switch'"
-                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)" />
+                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"></n-switch>
                     <n-input-number v-else-if="f.type === 'number'"
                                     :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
-                                    :min="f.min" :max="f.max" style="width:220px" />
+                                    :min="f.min" :max="f.max" style="width:220px"></n-input-number>
                     <n-select v-else-if="f.type === 'tags'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                               filterable tag multiple :options="[]"
@@ -118,7 +118,7 @@
                               multiple :options="displayFieldOptions" />
                     <n-input v-else-if="f.type === 'textarea'"
                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
-                             type="textarea" :rows="3" />
+                             type="textarea" :rows="3"></n-input>
                     <n-input v-else
                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)" />
                     <div class="muted" v-if="f.hint">{{ f.hint }}</div>
@@ -142,12 +142,12 @@
                 <n-gi v-for="s in modelSelects" :key="s.key">
                   <div class="field-label">{{ s.label }}</div>
                   <n-select v-model:value="selection[s.key]" :options="providerOptions"
-                            filterable clearable placeholder="（跟随兜底 / 系统默认）" size="small" />
+                            filterable clearable placeholder="（跟随兜底 / 系统默认）" size="small"></n-select>
                 </n-gi>
                 <n-gi>
                   <div class="field-label">兜底模型（各功能未选择时使用）</div>
                   <n-select v-model:value="selection.fallback" :options="providerOptions"
-                            filterable clearable placeholder="（系统默认）" size="small" />
+                            filterable clearable placeholder="（系统默认）" size="small"></n-select>
                 </n-gi>
               </n-grid>
               <n-space>
@@ -165,7 +165,7 @@
               :data="llmItems"
               :row-key="p => p.id"
               :loading="modelsLoading"
-              size="small" />
+              size="small"></n-data-table>
           </n-card>
         </template>
       </n-layout-content>
@@ -176,7 +176,7 @@
       <n-drawer-content :title="drawerTitle" closable>
         <n-space vertical size="large">
           <n-space align="center" :wrap="false">
-            <n-select v-model:value="memberFilter" :options="filterOptions" size="small" style="width:170px" />
+            <n-select v-model:value="memberFilter" :options="filterOptions" size="small" style="width:170px"></n-select>
             <n-button size="small" :loading="memberLoading" @click="loadMembers(currentGid)">🔄 刷新列表</n-button>
             <n-text depth="3">{{ memberSummary }}</n-text>
           </n-space>
@@ -186,7 +186,7 @@
             :pagination="memberPagination"
             :row-key="m => m.user_id"
             :loading="memberLoading"
-            size="small" />
+            size="small"></n-data-table>
         </n-space>
       </n-drawer-content>
     </n-drawer>
@@ -198,7 +198,7 @@
   "use strict";
   var bridge = null;
   var message = naive.createDiscreteApi(["message"]).message;
-  var { createApp, h, ref, computed } = Vue;
+  var { createApp, h, ref, computed, onMounted } = Vue;
 
   function groupAvatarUrl(gid) { return "https://p.qlogo.cn/gh/" + gid + "/" + gid + "/140"; }
   function memberAvatarUrl(uid) { return "https://q1.qlogo.cn/g?b=qq&nk=" + uid + "&s=40"; }
@@ -541,9 +541,21 @@
         if (key === "config" && !Object.keys(configData.value).length) loadConfig();
       }
 
+      onMounted(function () {
+        refresh();
+        try {
+          var ctx = window.AstrBotPluginPage && window.AstrBotPluginPage.getContext &&
+                    window.AstrBotPluginPage.getContext();
+          if (ctx && typeof ctx.isDark === "boolean") { isDark.value = ctx.isDark; return; }
+        } catch (e) { /* sandbox 下安全忽略 */ }
+        if (window.matchMedia) {
+          isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        }
+      });
+
       // ───────────────────────── 暴露给模板 ─────────────────────────
       return {
-        theme: theme, themeOverrides: themeOverrides,
+        theme: theme, themeOverrides: themeOverrides, collapsed: collapsed,
         activePage: activePage, menuOptions: menuOptions, onMenuUpdate: onMenuUpdate,
         loading: loading, groups: groups, totalMembers: totalMembers,
         totalInfoRecorded: totalInfoRecorded, totalJoinRecorded: totalJoinRecorded,
