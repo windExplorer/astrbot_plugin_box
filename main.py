@@ -107,9 +107,6 @@ class BoxPlugin(Star):
         if not target_id.isdigit():
             return "Box query failed: user_id must be a numeric QQ ID."
 
-        if target_id == event.get_self_id():
-            return "Box query failed: cannot query the bot itself."
-
         if (
             self.cfg.only_admin
             and not event.is_admin()
@@ -262,7 +259,6 @@ class BoxPlugin(Star):
                 ats.add(arg[1:])
             elif arg.isdigit():
                 ats.add(arg)
-        ats.discard(event.get_self_id())
         if block_ids:
             ats.difference_update(block_ids)
         return list(ats)
