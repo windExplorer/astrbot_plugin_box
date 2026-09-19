@@ -210,7 +210,7 @@
     "welcome_images": {
         "description": "欢迎图片池",
         "type": "list",
-        "hint": "http/https 图片链接；入群卡内随机嵌入一张（下载失败则只显示文字），留空不嵌入",
+        "hint": "http/https 图片链接，支持 PNG/JPG/WebP 等常见格式（按内容识别，与后缀无关；动图取第一帧）。入群卡内随机嵌入一张（下载失败则只显示文字），留空不嵌入",
         "default": []
     },
     "welcome_ai_enabled": {
