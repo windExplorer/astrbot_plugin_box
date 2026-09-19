@@ -36,6 +36,22 @@ FOOTER_TEXT = (176, 118, 148)
 BORDER = (243, 216, 229)
 SHADOW_COLOR = (190, 90, 140)
 
+# per-card-type theme: header gradient / footer / border / accent ("" = normal query)
+_TYPE_THEMES = {
+    "": {"top": (255, 224, 238), "bottom": (255, 163, 205), "footer": (250, 236, 243),
+         "border": (243, 216, 229), "accent": (214, 84, 146), "label": ""},
+    "join": {"top": (216, 245, 226), "bottom": (158, 220, 188), "footer": (233, 246, 238),
+             "border": (186, 227, 203), "accent": (56, 128, 92), "label": "新朋友"},
+    "leave": {"top": (233, 230, 245), "bottom": (196, 190, 226), "footer": (238, 236, 247),
+              "border": (213, 209, 235), "accent": (110, 98, 146), "label": "已退群"},
+    "kick": {"top": (255, 217, 217), "bottom": (249, 158, 168), "footer": (252, 233, 234),
+             "border": (247, 201, 205), "accent": (192, 72, 72), "label": "被踢出群"},
+}
+
+
+def _type_theme(card_type: str) -> dict:
+    return _TYPE_THEMES.get(card_type) or _TYPE_THEMES[""]
+
 # ---------------------------------------------------------------- layout
 CARD_W = 1040
 PAD = 56
@@ -50,6 +66,7 @@ LINE_GAP = 6
 FONT_SIZE = 32
 TITLE_SIZE = 54
 LEVEL_SIZE = 26
+CHIP_SIZE = 28
 SUBTITLE_SIZE = 27
 SIGN_SIZE = 26
 ANALYSIS_SIZE = 28
@@ -371,14 +388,14 @@ class CardMaker:
         "kick": ("被踢出群", (255, 212, 212), (190, 72, 72)),
     }
 
-    def _chip_metrics(self, card_type: str) -> tuple[str, int, int, tuple, tuple] | None:
-        """Header corner chip for event cards: (text, width, height, bg, fg) or None."""
-        chip = self._CARD_TYPE_CHIPS.get(card_type)
-        if not chip:
+    def _chip_metrics(self, card_type: str) -> tuple[str, int, int, tuple] | None:
+        """Header corner chip for event cards: (text, width, height, accent) or None."""
+        theme = _type_theme(card_type)
+        label = theme.get("label")
+        if not label:
             return None
-        text, bg, fg = chip
-        font = self._font(FOOTER_SIZE)
-        return text, int(self._measure(text, font)) + 26, sum(font.getmetrics()) + 12, bg, fg
+        font = self._font(CHIP_SIZE)
+        return label, int(self._measure(label, font)) + 30, sum(font.getmetrics()) + 14, theme["accent"]
 
     def create(
         self,
@@ -439,11 +456,12 @@ class CardMaker:
         img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(20)))
 
         ox, oy = shadow_pad, shadow_pad
+        theme = _type_theme(card_type)
         card = Image.new("RGBA", (CARD_W, card_h), (0, 0, 0, 0))
         cdraw = ImageDraw.Draw(card)
         cdraw.rounded_rectangle([0, 0, CARD_W - 1, card_h - 1], RADIUS, fill=(*CARD_BG, 255))
-        self._paint_header(card, header_h)
-        self._paint_footer(card, card_h, fetched_at)
+        self._paint_header(card, header_h, card_type)
+        self._paint_footer(card, card_h, fetched_at, card_type)
         card.putalpha(_rounded_mask((CARD_W, card_h), RADIUS))
         img.alpha_composite(card, (ox, oy))
 
@@ -475,7 +493,7 @@ class CardMaker:
 
         # brand border
         draw.rounded_rectangle(
-            [ox, oy, ox + CARD_W - 1, oy + card_h - 1], RADIUS, outline=(*BORDER, 255), width=2
+            [ox, oy, ox + CARD_W - 1, oy + card_h - 1], RADIUS, outline=(*theme["border"], 255), width=2
         )
 
         out = BytesIO()
@@ -590,13 +608,14 @@ class CardMaker:
         img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
         return img.resize((AVATAR_D, AVATAR_D), Image.LANCZOS)
 
-    def _paint_header(self, card: Image.Image, header_h: int) -> None:
+    def _paint_header(self, card: Image.Image, header_h: int, card_type: str = "") -> None:
+        theme = _type_theme(card_type)
         header = Image.new("RGBA", (CARD_W, header_h))
         hdraw = ImageDraw.Draw(header)
         for row in range(header_h):
             hdraw.line(
                 [(0, row), (CARD_W, row)],
-                fill=(*_mix(HEADER_TOP, HEADER_BOTTOM, row / header_h), 255),
+                fill=(*_mix(theme["top"], theme["bottom"], row / header_h), 255),
             )
         mask = Image.new("L", (CARD_W, header_h), 0)
         mdraw = ImageDraw.Draw(mask)
@@ -604,8 +623,9 @@ class CardMaker:
         mdraw.rectangle([0, RADIUS, CARD_W, header_h], fill=255)
         card.paste(header, (0, 0), mask)
 
-    def _paint_footer(self, card: Image.Image, card_h: int, fetched_at: datetime | None) -> None:
-        footer = Image.new("RGBA", (CARD_W, FOOTER_H), (*FOOTER_BG, 255))
+    def _paint_footer(self, card: Image.Image, card_h: int, fetched_at: datetime | None, card_type: str = "") -> None:
+        theme = _type_theme(card_type)
+        footer = Image.new("RGBA", (CARD_W, FOOTER_H), (*theme["footer"], 255))
         mask = Image.new("L", (CARD_W, FOOTER_H), 0)
         mdraw = ImageDraw.Draw(mask)
         mdraw.rounded_rectangle([0, 0, CARD_W - 1, FOOTER_H - 1], RADIUS, fill=255)
@@ -614,14 +634,15 @@ class CardMaker:
 
         fdraw = ImageDraw.Draw(card)
         font = self._font(FOOTER_SIZE)
+        footer_text = theme["accent"] if card_type else FOOTER_TEXT
         cy = card_h - FOOTER_H + (FOOTER_H - sum(font.getmetrics())) / 2
         _cat_face(fdraw, PAD + 12, card_h - FOOTER_H / 2, 15)
-        fdraw.text((PAD + 40, cy), "萌萌资料卡", font=font, fill=(*FOOTER_TEXT, 255))
-        _heart(fdraw, PAD + 44 + self._measure("萌萌资料卡", font) + 14, card_h - FOOTER_H / 2, 8, (255, 111, 165, 200))
+        fdraw.text((PAD + 40, cy), "萌萌资料卡", font=font, fill=(*footer_text, 255))
+        _heart(fdraw, PAD + 44 + self._measure("萌萌资料卡", font) + 14, card_h - FOOTER_H / 2, 8, (*footer_text, 200))
         if fetched_at:
             time_text = fetched_at.strftime("%Y-%m-%d %H:%M")
             tw = self._measure(time_text, font)
-            fdraw.text((CARD_W - PAD - tw, cy), time_text, font=font, fill=(*FOOTER_TEXT, 235))
+            fdraw.text((CARD_W - PAD - tw, cy), time_text, font=font, fill=(*footer_text, 235))
 
     def _paint_qq_digits(self, img: Image.Image, draw: ImageDraw.ImageDraw, x: float, y: float, qq: str) -> None:
         """Draw the QQ number as one cute tilted white square per digit.
@@ -733,17 +754,19 @@ class CardMaker:
         sdraw = ImageDraw.Draw(img)
         chip = self._chip_metrics(card_type)
         if chip:
-            chip_text, chip_w, chip_h, chip_bg, chip_fg = chip
+            chip_text, chip_w, chip_h, accent = chip
             chip_x = CARD_W - PAD - chip_w
             chip_y = 36
             sdraw.rounded_rectangle(
                 [ox + chip_x, oy + chip_y, ox + chip_x + chip_w, oy + chip_y + chip_h],
                 chip_h / 2,
-                fill=(*chip_bg, 255),
+                fill=(255, 255, 255, 255),
+                outline=(*accent, 255),
+                width=2,
             )
             sdraw.text(
-                (ox + chip_x + 13, oy + chip_y + 6), chip_text,
-                font=self._font(FOOTER_SIZE), fill=(*chip_fg, 255),
+                (ox + chip_x + 15, oy + chip_y + 7), chip_text,
+                font=self._font(CHIP_SIZE), fill=(*accent, 255),
             )
         else:
             _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
