@@ -1,4 +1,5 @@
 import asyncio
+import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -46,6 +47,9 @@ class BoxResult:
     display_name: str = ""  # 群昵称或昵称，欢迎语等场景使用
     join_pos: int = 0
     join_total: int = 0
+
+    welcome_text: str = ""  # 入群卡内嵌欢迎语
+    welcome_image: bytes | None = None  # 入群卡内嵌欢迎图片
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -253,6 +257,11 @@ class BoxService:
                 bot, group_id, target_id
             )
         result.analyses = await self._get_analyses(target_id, profile, display, card_type)
+        if card_type == "join" and self.cfg.welcome_enabled:
+            result.welcome_text = await self._build_welcome(result)
+            pool = [u for u in (self.cfg.welcome_images or []) if str(u).strip()]
+            if pool:
+                result.welcome_image = await self._download_image(str(random.choice(pool)))
         return result
 
     async def render_box_image(self, result: BoxResult) -> bytes:
@@ -270,6 +279,8 @@ class BoxService:
             result.analyses,
             datetime.now(),
             result.card_type,
+            result.welcome_text,
+            result.welcome_image,
         )
         return result.image
 
@@ -361,6 +372,55 @@ class BoxService:
             await self.render_box_image(result)
             self._cache_store(group_id, target_id, result)
             return result
+
+    # ------------------------------------------------------------ 欢迎语
+    async def _build_welcome(self, result: BoxResult) -> str:
+        """Fill the welcome template for a join card (rendered inside the card)."""
+        template = str(self.cfg.welcome_text or "").strip() or "🎉 欢迎 {name} 加入本群！\n{count_text}"
+        count_text = ""
+        if result.join_pos:
+            count_text = f"你是本群第 {result.join_pos} 位成员（共 {result.join_total} 人）"
+        name = result.display_name or "新朋友"
+        try:
+            text = template.format(name=name, count_text=count_text)
+        except Exception as e:
+            logger.warning(f"[资料卡] 欢迎语模板格式错误: {e}")
+            text = f"🎉 欢迎 {name} 加入本群！"
+        text = "\n".join(line for line in text.splitlines() if line.strip())
+        if self.cfg.welcome_ai_enabled:
+            ai_text = await self._gen_welcome_ai(name)
+            if ai_text:
+                text += f"\n✨ {ai_text}"
+        return text
+
+    async def _gen_welcome_ai(self, name: str) -> str:
+        """Optional LLM-generated welcome line, with retries."""
+        provider = self.cfg.context.get_using_provider()
+        if not provider:
+            return ""
+        prompt = str(self.cfg.welcome_ai_prompt or "").replace("{name}", name).strip()
+        if not prompt:
+            return ""
+        retries = max(0, int(self.cfg.welcome_ai_retry or 0))
+        for attempt in range(retries + 1):
+            try:
+                resp = await provider.text_chat(prompt=prompt)
+                return (resp.completion_text or "").strip()[:100]
+            except Exception as e:
+                logger.debug(f"[资料卡] AI 欢迎语第 {attempt + 1}/{retries + 1} 次生成失败: {e}")
+        return ""
+
+    async def _download_image(self, url: str) -> bytes | None:
+        if not url.startswith(("http://", "https://")):
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                response = await session.get(url)
+                response.raise_for_status()
+                return await response.read()
+        except Exception as e:
+            logger.warning(f"[资料卡] 欢迎图片下载失败: {e}")
+            return None
 
     async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> tuple[str, int, int]:
         """Compute the member's join order within the group.

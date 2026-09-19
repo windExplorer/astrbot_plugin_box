@@ -207,56 +207,15 @@ class BoxPlugin(Star):
             operator_id=str(raw.get("operator_id") or "") if is_kick else "",
         )
 
-        welcome_text = ""
+        welcome_shown = False
         if not result.is_fail():
-            if is_enter:
-                welcome_text = await self._build_welcome(result)
-            await self.send_box_image(
-                event, result,
-                welcome_text=welcome_text,
-                at_user=user_id if welcome_text else "",
-            )
+            welcome_shown = is_enter and self.cfg.welcome_enabled
+            await self.send_box_image(event, result)
 
         event.stop_event()
 
-        if is_enter and welcome_text and self.cfg.welcome_private_rules and self.cfg.group_rules:
+        if is_enter and welcome_shown and self.cfg.welcome_private_rules and self.cfg.group_rules:
             asyncio.create_task(self._send_private_rules(event.bot, user_id))
-
-    async def _build_welcome(self, result: BoxResult) -> str:
-        """Fill the welcome template for a freshly shown join card."""
-        template = str(self.cfg.welcome_text or "").strip() or "🎉 欢迎 {name} 加入本群！\n{count_text}"
-        count_text = ""
-        if result.join_pos:
-            count_text = f"你是本群第 {result.join_pos} 位成员（共 {result.join_total} 人）"
-        name = result.display_name or "新朋友"
-        try:
-            text = template.format(name=name, count_text=count_text)
-        except Exception as e:
-            logger.warning(f"[资料卡] 欢迎语模板格式错误: {e}")
-            text = f"🎉 欢迎 {name} 加入本群！"
-        text = "\n".join(line for line in text.splitlines() if line.strip())
-        if self.cfg.welcome_ai_enabled:
-            ai_text = await self._gen_welcome_ai(name)
-            if ai_text:
-                text += f"\n✨ {ai_text}"
-        return text
-
-    async def _gen_welcome_ai(self, name: str) -> str:
-        """Optional LLM-generated welcome line, with retries."""
-        provider = self.cfg.context.get_using_provider()
-        if not provider:
-            return ""
-        prompt = str(self.cfg.welcome_ai_prompt or "").replace("{name}", name).strip()
-        if not prompt:
-            return ""
-        retries = max(0, int(self.cfg.welcome_ai_retry or 0))
-        for attempt in range(retries + 1):
-            try:
-                resp = await provider.text_chat(prompt=prompt)
-                return (resp.completion_text or "").strip()[:100]
-            except Exception as e:
-                logger.debug(f"[资料卡] AI 欢迎语第 {attempt + 1}/{retries + 1} 次生成失败: {e}")
-        return ""
 
     async def _send_private_rules(self, bot: CQHttp, user_id: str) -> None:
         await asyncio.sleep(2)
@@ -269,16 +228,11 @@ class BoxPlugin(Star):
         self,
         event: AiocqhttpMessageEvent,
         result: BoxResult,
-        welcome_text: str = "",
-        at_user: str = "",
     ):
         if result.is_fail() or not result.image:
             return
 
         chain: list[BaseMessageComponent] = [Comp.Image.fromBytes(result.image)]
-        if welcome_text and at_user:
-            chain.append(At(qq=at_user))
-            chain.append(Comp.Plain(f" {welcome_text}"))
 
         recall_time = self.cfg.recall_time
 

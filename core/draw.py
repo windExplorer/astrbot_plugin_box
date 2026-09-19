@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 
 import emoji
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from .profile import BoxUserProfile
 
@@ -406,6 +406,8 @@ class CardMaker:
         analyses: dict[str, str] | None = None,
         fetched_at: datetime | None = None,
         card_type: str = "",
+        welcome_text: str = "",
+        welcome_image: bytes | None = None,
     ) -> bytes:
         """Create a profile card PNG.
 
@@ -417,6 +419,8 @@ class CardMaker:
             analyses: Optional AI comments keyed "avatar" / "signature" / "overall".
             fetched_at: When the profile data was fetched (shown in the footer).
             card_type: "" / "join" / "leave" / "kick" — draws the header corner chip.
+            welcome_text: Optional welcome message rendered inside join cards.
+            welcome_image: Optional pool image embedded inside join cards.
 
         Returns:
             Rendered PNG bytes.
@@ -438,8 +442,11 @@ class CardMaker:
         if len(blocks) > 1:
             analysis_h += ROW_GAP * (len(blocks) - 1)
 
+        welcome_img, welcome_img_h = self._fit_welcome_image(welcome_image)
+        welcome_h = self._welcome_height(welcome_text, welcome_img_h) if welcome_text else 0
+
         header_h = self._header_height(title, level, sig, card_type)
-        card_h = header_h + analysis_h + body_h + FOOTER_H
+        card_h = header_h + welcome_h + analysis_h + body_h + FOOTER_H
         shadow_pad = 52
         canvas_w = CARD_W + shadow_pad * 2
         canvas_h = card_h + shadow_pad * 2
@@ -470,6 +477,8 @@ class CardMaker:
         self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h, card_type)
 
         y = oy + header_h + BODY_TOP_PAD
+        if welcome_text:
+            y = self._paint_welcome(img, draw, ox, y, welcome_text, welcome_img, card_type) + ROW_GAP
         for block_label, block_text in blocks:
             y = self._paint_analysis(img, draw, ox, y, block_label, block_text) + ROW_GAP
 
@@ -823,6 +832,73 @@ class CardMaker:
         for part in self._wrap(analysis, font, text_w_limit):
             self._draw_mixed(img, draw, (ox + PAD + ROW_PAD_X, ty), part, font, (*TEXT_DARK, 255))
             ty += sum(font.getmetrics()) + LINE_GAP
+        return y + block_h
+
+    # ------------------------------------------------------------ 欢迎区
+    def _fit_welcome_image(self, welcome_image: bytes | None) -> tuple[Image.Image | None, int]:
+        """Scale the pool image to card width (cap 640px height) and round its corners."""
+        if not welcome_image:
+            return None, 0
+        try:
+            wimg = Image.open(BytesIO(welcome_image)).convert("RGBA")
+            max_w = CARD_W - PAD * 2 - ROW_PAD_X * 2
+            scale = min(max_w / wimg.width, 640 / wimg.height, 1.0)
+            new_w = max(1, int(wimg.width * scale))
+            new_h = max(1, int(wimg.height * scale))
+            wimg = wimg.resize((new_w, new_h), Image.LANCZOS)
+            wimg.putalpha(ImageChops.multiply(wimg.getchannel("A"), _rounded_mask((new_w, new_h), 16)))
+            return wimg, new_h + 10
+        except Exception:
+            return None, 0
+
+    def _welcome_height(self, welcome_text: str, welcome_img_h: int) -> int:
+        block_w = CARD_W - PAD * 2
+        text_limit = block_w - ROW_PAD_X * 2
+        label_font = self._font(FOOTER_SIZE)
+        font = self._font(FONT_SIZE)
+        label_h = sum(label_font.getmetrics()) + 6
+        n = 0
+        for part in welcome_text.split("\n"):
+            n += len(self._wrap(part, font, text_limit))
+        return 2 * ROW_PAD_V + 12 + label_h + n * (sum(font.getmetrics()) + LINE_GAP) + welcome_img_h
+
+    def _paint_welcome(
+        self,
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        ox: int,
+        y: int,
+        welcome_text: str,
+        welcome_img: Image.Image | None,
+        card_type: str,
+    ) -> int:
+        """Draw the welcome block (text + optional pool image); returns bottom y."""
+        theme = _type_theme(card_type)
+        block_w = CARD_W - PAD * 2
+        text_limit = block_w - ROW_PAD_X * 2
+        label_font = self._font(FOOTER_SIZE)
+        font = self._font(FONT_SIZE)
+        label_h = sum(label_font.getmetrics())
+        text_lines = []
+        for part in welcome_text.split("\n"):
+            text_lines.extend(self._wrap(part, font, text_limit))
+        img_h = (welcome_img.height + 10) if welcome_img is not None else 0
+        block_h = 2 * ROW_PAD_V + 12 + label_h + 6 + len(text_lines) * (sum(font.getmetrics()) + LINE_GAP) + img_h
+
+        draw.rounded_rectangle([ox + PAD, y, ox + PAD + block_w, y + block_h], 20, fill=(*theme["footer"], 255))
+        ty = y + ROW_PAD_V + 12
+        _heart(draw, ox + PAD + ROW_PAD_X + 7, ty + label_h / 2, 9, (*theme["accent"], 230))
+        draw.text(
+            (ox + PAD + ROW_PAD_X + 24, ty), "欢迎你 · Welcome",
+            font=label_font, fill=(*theme["accent"], 255),
+        )
+        ty += label_h + 6
+        for part in text_lines:
+            self._draw_mixed(img, draw, (ox + PAD + ROW_PAD_X, ty), part, font, (*TEXT_DARK, 255))
+            ty += sum(font.getmetrics()) + LINE_GAP
+        if welcome_img is not None:
+            ix = ox + PAD + (block_w - welcome_img.width) // 2
+            img.alpha_composite(welcome_img, (ix, ty))
         return y + block_h
 
     # ------------------------------------------------------------ placeholder

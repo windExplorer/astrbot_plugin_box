@@ -198,7 +198,7 @@
     "welcome_enabled": {
         "description": "入群欢迎语",
         "type": "bool",
-        "hint": "入群卡展示后，在同一消息里 @ 新成员并发送欢迎语文本（需开启自动展示入群卡）",
+        "hint": "在入群卡片内展示欢迎语区块（需开启自动展示入群卡）",
         "default": true
     },
     "welcome_text": {
@@ -206,6 +206,12 @@
         "type": "string",
         "hint": "支持 {name} 与 {count_text} 占位符；{count_text} 会替换为「你是本群第 N 位成员（共 M 人）」",
         "default": "🎉 欢迎 {name} 加入本群！\n{count_text}"
+    },
+    "welcome_images": {
+        "description": "欢迎图片池",
+        "type": "list",
+        "hint": "http/https 图片链接；入群卡内随机嵌入一张（下载失败则只显示文字），留空不嵌入",
+        "default": []
     },
     "welcome_ai_enabled": {
         "description": "AI 欢迎语",
