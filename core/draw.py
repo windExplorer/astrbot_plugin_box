@@ -1,10 +1,13 @@
 """MoeMoe profile card renderer.
 
-Draws the profile card in the same pastel style as the plugin logo:
-pink gradient header with the avatar and nickname, a white body with
-soft colored rows for each field, and a branded footer strip.
+Draws the profile card in the same pastel style as the plugin logo, using
+Resource Han Rounded (SIL OFL, see resource/OFL-License.txt):
+pink gradient header with the avatar, nickname, QQ level badges and the
+signature, a white body with uniform rows for the remaining fields, an
+optional LLM comment block, and a branded footer with the fetch time.
 """
 
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -14,41 +17,45 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from .profile import BoxUserProfile
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resource"
+FONT_PATH = RESOURCE_DIR / "ResourceHanRoundedCN-Medium.ttf"
+EMOJI_PATH = RESOURCE_DIR / "NotoColorEmoji.ttf"
 
 # ---------------------------------------------------------------- palette
-HEADER_TOP = (255, 220, 236)
-HEADER_BOTTOM = (255, 156, 200)
+HEADER_TOP = (255, 224, 238)
+HEADER_BOTTOM = (255, 163, 205)
 CARD_BG = (255, 255, 255)
-ROW_STYLES = [  # (row background, label color), cycled like the logo bars
-    ((255, 241, 247), (214, 84, 146)),
-    ((247, 242, 255), (138, 100, 210)),
-    ((239, 247, 255), (66, 142, 208)),
-    ((255, 247, 232), (206, 138, 62)),
-]
-TEXT_DARK = (74, 59, 71)
-TITLE_COLOR = (92, 62, 84)
-SUBTITLE_COLOR = (255, 255, 255)
-FOOTER_BG = (255, 232, 243)
-FOOTER_TEXT = (191, 108, 152)
-BORDER = (255, 194, 222)
+ROW_BG = (247, 243, 246)
+LABEL_COLOR = (186, 108, 143)
+TEXT_DARK = (72, 66, 82)
+TITLE_COLOR = (82, 58, 78)
+SUBTITLE_COLOR = (255, 255, 255, 235)
+SIGN_COLOR = (129, 82, 108)
+ANALYSIS_BG = (255, 246, 228)
+ANALYSIS_LABEL = (196, 138, 46)
+FOOTER_BG = (250, 236, 243)
+FOOTER_TEXT = (176, 118, 148)
+BORDER = (243, 216, 229)
 SHADOW_COLOR = (190, 90, 140)
 
 # ---------------------------------------------------------------- layout
 CARD_W = 1040
 PAD = 56
-HEADER_H = 300
-FOOTER_H = 78
 AVATAR_D = 216
 AVATAR_RING = 10
 RADIUS = 48
+FOOTER_H = 74
 ROW_PAD_X = 26
 ROW_PAD_V = 9
 ROW_GAP = 14
 LINE_GAP = 6
-FONT_SIZE = 34
-TITLE_SIZE = 58
-SUBTITLE_SIZE = 30
-FOOTER_SIZE = 26
+FONT_SIZE = 32
+TITLE_SIZE = 54
+LEVEL_SIZE = 30
+SUBTITLE_SIZE = 27
+SIGN_SIZE = 26
+ANALYSIS_SIZE = 28
+FOOTER_SIZE = 24
+HEADER_TOP_PAD = 42
 BODY_TOP_PAD = 26
 BODY_BOTTOM_PAD = 26
 
@@ -82,12 +89,9 @@ def _heart(draw: ImageDraw.ImageDraw, cx: float, cy: float, s: float, fill: tupl
 def _cat_face(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float) -> None:
     """Cute cat face, parameterized around the logo avatar proportions (r=95)."""
     k = r / 95
-    ear = (255, 217, 160)
-    inner = (255, 170, 185)
-    face = (255, 224, 170)
-    eye = (110, 72, 60)
-    blush = (255, 148, 170, 150)
-    whisk = (150, 110, 90, 110)
+    ear, inner = (255, 217, 160), (255, 170, 185)
+    face, eye = (255, 224, 170), (110, 72, 60)
+    blush, whisk = (255, 148, 170, 150), (150, 110, 90, 110)
 
     draw.polygon(
         [(cx - 78 * k, cy - 62 * k), (cx - 96 * k, cy - 158 * k), (cx + 10 * k, cy - 96 * k)],
@@ -112,8 +116,7 @@ def _cat_face(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float) -> None
     mw = max(3, int(6 * k))
     draw.arc([cx - 17 * k, cy + 16 * k, cx + 1 * k, cy + 36 * k], 0, 180, fill=eye, width=mw)
     draw.arc([cx + 1 * k, cy + 16 * k, cx + 19 * k, cy + 36 * k], 0, 180, fill=eye, width=mw)
-    bw = 34 * k
-    bh = 22 * k
+    bw, bh = 34 * k, 22 * k
     draw.ellipse([cx - 84 * k, cy + 6 * k, cx - 84 * k + bw, cy + 6 * k + bh], fill=blush)
     draw.ellipse([cx + 84 * k - bw, cy + 6 * k, cx + 84 * k, cy + 6 * k + bh], fill=blush)
     ww = max(2, int(4 * k))
@@ -123,17 +126,93 @@ def _cat_face(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float) -> None
     draw.line([cx + 108 * k, cy + 6 * k, cx + 142 * k, cy + 14 * k], fill=whisk, width=ww)
 
 
+# ------------------------------------------------- QQ level icon painters
+def _icon_crown(size: int) -> Image.Image:
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    gold = (246, 184, 76, 255)
+    d.polygon(
+        [(0.08 * size, 0.78 * size), (0.02 * size, 0.28 * size), (0.28 * size, 0.48 * size),
+         (0.5 * size, 0.12 * size), (0.72 * size, 0.48 * size), (0.98 * size, 0.28 * size),
+         (0.92 * size, 0.78 * size)],
+        fill=gold,
+    )
+    d.rounded_rectangle([0.08 * size, 0.82 * size, 0.92 * size, 0.94 * size], 2, fill=gold)
+    return img
+
+
+def _icon_sun(size: int) -> Image.Image:
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    c = size / 2
+    ray, r1, r2 = size * 0.10, size * 0.30, size * 0.47
+    for i in range(8):
+        a = i * 45
+        x1 = c + r1 * _cos(a)
+        y1 = c + r1 * _sin(a)
+        x2 = c + r2 * _cos(a - 14)
+        y2 = c + r2 * _sin(a - 14)
+        x3 = c + r2 * _cos(a + 14)
+        y3 = c + r2 * _sin(a + 14)
+        d.polygon([(x1, y1), (x2, y2), (x3, y3)], fill=(247, 166, 76, 255))
+    d.ellipse([c - size * 0.27, c - size * 0.27, c + size * 0.27, c + size * 0.27], fill=(250, 190, 96, 255))
+    return img
+
+
+def _cos(deg: float) -> float:
+    import math
+
+    return math.cos(math.radians(deg))
+
+
+def _sin(deg: float) -> float:
+    import math
+
+    return math.sin(math.radians(deg))
+
+
+def _icon_moon(size: int) -> Image.Image:
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse([0.12 * size, 0.08 * size, 0.88 * size, 0.92 * size], fill=(245, 205, 107, 255))
+    # punch out an offset circle to form the crescent (PIL shapes write raw pixels)
+    d.ellipse([0.34 * size, 0.0, 1.06 * size, 0.72 * size], fill=(0, 0, 0, 0))
+    return img
+
+
+def _icon_star(size: int) -> Image.Image:
+    import math
+
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    c, r1, r2 = size / 2, size * 0.5, size * 0.21
+    pts = []
+    for i in range(10):
+        r = r1 if i % 2 == 0 else r2
+        a = -90 + i * 36
+        pts.append((c + r * math.cos(math.radians(a)), c + r * math.sin(math.radians(a))))
+    d.polygon(pts, fill=(246, 194, 76, 255))
+    return img
+
+
+ICON_PAINTERS = {
+    "👑": _icon_crown,
+    "🌞": _icon_sun,
+    "🌙": _icon_moon,
+    "⭐": _icon_star,
+}
+
+
 class CardMaker:
     """Renders QQ profile data into a moe-style profile card PNG."""
 
     def __init__(self, font_size: int = FONT_SIZE):
         self.font_size = font_size
-        self.font = ImageFont.truetype(RESOURCE_DIR / "box.ttf", font_size)
+        self.font = ImageFont.truetype(FONT_PATH, font_size)
         try:
-            self.emoji_font = ImageFont.truetype(RESOURCE_DIR / "NotoColorEmoji.ttf", font_size)
+            self.emoji_font = ImageFont.truetype(EMOJI_PATH, font_size)
         except OSError:
-            self.emoji_font = ImageFont.truetype(RESOURCE_DIR / "NotoColorEmoji.ttf", 109)
-        self._emoji_h = int(font_size * 1.18)
+            self.emoji_font = ImageFont.truetype(EMOJI_PATH, 109)
         self._font_cache: dict[int, ImageFont.FreeTypeFont] = {font_size: self.font}
         self._emoji_tiles: dict[str, Image.Image | None] = {}
         # the bundled emoji font is subsetted; missing glyphs would render as
@@ -141,9 +220,7 @@ class CardMaker:
         try:
             from fontTools.ttLib import TTFont
 
-            self._cmap: set[int] | None = set(
-                TTFont(str(RESOURCE_DIR / "NotoColorEmoji.ttf")).getBestCmap().keys()
-            )
+            self._cmap: set[int] | None = set(TTFont(str(EMOJI_PATH)).getBestCmap().keys())
         except Exception:
             self._cmap = None
 
@@ -151,7 +228,7 @@ class CardMaker:
     def _font(self, size: int) -> ImageFont.FreeTypeFont:
         font = self._font_cache.get(size)
         if font is None:
-            font = ImageFont.truetype(RESOURCE_DIR / "box.ttf", size)
+            font = ImageFont.truetype(FONT_PATH, size)
             self._font_cache[size] = font
         return font
 
@@ -200,6 +277,11 @@ class CardMaker:
             lines.append(cur)
         return lines
 
+    def _truncate(self, text: str, font: ImageFont.FreeTypeFont, limit: float, tail: str = "…") -> str:
+        while text and self._measure(text + tail, font) > limit:
+            text = text[:-1]
+        return text + tail
+
     def _emoji_tile(self, ch: str) -> Image.Image | None:
         """Render an emoji glyph as a white-on-transparent tile (alpha = coverage).
 
@@ -238,6 +320,12 @@ class CardMaker:
         for run, is_em in self._runs(text):
             if is_em:
                 for ch in run:
+                    if ch in ICON_PAINTERS:
+                        tile = ICON_PAINTERS[ch](emoji_h)
+                        ey = int(y + (ascent - emoji_h) / 2 + font.size * 0.06)
+                        img.alpha_composite(tile, (int(x), max(0, ey)))
+                        x += tile.width + 3
+                        continue
                     tile = self._emoji_tile(ch)
                     if tile is not None:
                         w = max(1, int(tile.width * emoji_h / tile.height))
@@ -276,26 +364,41 @@ class CardMaker:
         return rows
 
     # ------------------------------------------------------------ card
-    def create(self, avatar: bytes, reply: list[str]) -> bytes:
+    def create(
+        self,
+        avatar: bytes,
+        reply: list[str],
+        join_rank: str = "",
+        analysis: str = "",
+        fetched_at: datetime | None = None,
+    ) -> bytes:
         """Create a profile card PNG.
 
         Args:
             avatar: Avatar image bytes.
             reply: Display lines to render.
+            join_rank: Optional join-order text, e.g. "第 12 位 · 共 345 人".
+            analysis: Optional LLM comment shown in a dedicated block.
+            fetched_at: When the profile data was fetched (shown in the footer).
 
         Returns:
             Rendered PNG bytes.
         """
         rows = self._parse_rows(reply)
-        title, subtitle, rows = self._split_header(rows)
+        title, qq, level, sig, body = self._split_header(rows)
+        if join_rank:
+            body.insert(0, ["入群排位", [join_rank]])
 
         body_h = BODY_TOP_PAD + BODY_BOTTOM_PAD
-        if rows:
-            label_w = self._label_width(rows)
-            body_h += sum(self._row_height(label, value, label_w) for label, value in rows)
-            body_h += ROW_GAP * (len(rows) - 1)
+        label_w = self._label_width(body)
+        if body:
+            body_h += sum(self._row_height(label, values, label_w) for label, values in body)
+            body_h += ROW_GAP * (len(body) - 1)
 
-        card_h = HEADER_H + body_h + FOOTER_H
+        analysis_h = self._analysis_height(analysis) if analysis else 0
+
+        header_h = self._header_height(title, level, sig)
+        card_h = header_h + analysis_h + body_h + FOOTER_H
         shadow_pad = 52
         canvas_w = CARD_W + shadow_pad * 2
         canvas_h = card_h + shadow_pad * 2
@@ -311,47 +414,44 @@ class CardMaker:
         )
         img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(20)))
 
-        # card base + header + footer
         ox, oy = shadow_pad, shadow_pad
         card = Image.new("RGBA", (CARD_W, card_h), (0, 0, 0, 0))
         cdraw = ImageDraw.Draw(card)
         cdraw.rounded_rectangle([0, 0, CARD_W - 1, card_h - 1], RADIUS, fill=(*CARD_BG, 255))
-        self._paint_header(card)
-        self._paint_footer(card, card_h)
+        self._paint_header(card, header_h)
+        self._paint_footer(card, card_h, fetched_at)
         card.putalpha(_rounded_mask((CARD_W, card_h), RADIUS))
         img.alpha_composite(card, (ox, oy))
 
         draw = ImageDraw.Draw(img)
-
-        # header content
         avatar_img = self._load_avatar(avatar)
-        self._paint_header_content(img, draw, ox, oy, avatar_img, title, subtitle)
+        self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h)
 
-        # body rows
+        y = oy + header_h + BODY_TOP_PAD
+        if analysis:
+            y = self._paint_analysis(img, draw, ox, y, analysis) + ROW_GAP
+
         row_x = ox + PAD
         row_w = CARD_W - PAD * 2
-        label_w = self._label_width(rows) if rows else 0.0
-        y = oy + HEADER_H + BODY_TOP_PAD
-        for i, (label, values) in enumerate(rows):
-            bg, label_color = ROW_STYLES[i % len(ROW_STYLES)]
+        for i, (label, values) in enumerate(body):
             row_h = self._row_height(label, values, label_w)
-            draw.rounded_rectangle([row_x, y, row_x + row_w, y + row_h], 20, fill=(*bg, 255))
+            draw.rounded_rectangle([row_x, y, row_x + row_w, y + row_h], 20, fill=(*ROW_BG, 255))
             text_y = y + ROW_PAD_V
             value_x = row_x + ROW_PAD_X + label_w
             if label:
-                draw.text((row_x + ROW_PAD_X, text_y), label, font=self.font, fill=(*label_color, 255))
+                draw.text((row_x + ROW_PAD_X, text_y), label, font=self.font, fill=(*LABEL_COLOR, 255))
             limit = row_x + row_w - ROW_PAD_X - value_x
             line_pitch = self._line_h() + LINE_GAP
             j = 0
             for value in values:
                 for part in self._wrap(value, self.font, limit):
-                    self._draw_mixed(img, draw, (value_x, text_y + j * line_pitch), part, self.font, (*TEXT_DARK, 255), (*label_color, 255))
+                    self._draw_mixed(img, draw, (value_x, text_y + j * line_pitch), part, self.font, (*TEXT_DARK, 255), (*LABEL_COLOR, 255))
                     j += 1
             y += row_h + ROW_GAP
 
         # brand border
         draw.rounded_rectangle(
-            [ox, oy, ox + CARD_W - 1, oy + card_h - 1], RADIUS, outline=(*BORDER, 255), width=3
+            [ox, oy, ox + CARD_W - 1, oy + card_h - 1], RADIUS, outline=(*BORDER, 255), width=2
         )
 
         out = BytesIO()
@@ -374,31 +474,67 @@ class CardMaker:
         widths = [self._measure(label, self.font) for label, _ in rows if label]
         return max(widths) + 22 if widths else 0.0
 
-    def _split_header(
-        self, rows: list[list]
-    ) -> tuple[str, str, list[list]]:
+    def _split_header(self, rows: list[list]) -> tuple[str, str, str, str, list[list]]:
+        """Pull nickname/QQ/level/signature out of the rows for the header.
+
+        The QQ level only moves to the header when it carries level icons;
+        otherwise (e.g. "隐藏") it stays a normal row. The signature keeps
+        its wrapped lines joined back into one string.
+        """
         title = ""
-        subtitle = ""
+        qq = ""
+        level = ""
+        sig = ""
         body: list[list] = []
         for label, values in rows:
             first = values[0] if values else ""
             if not title and label == "昵称":
                 title = first
                 continue
-            if not subtitle and label == "QQ号":
-                subtitle = first
+            if not qq and label == "QQ号":
+                qq = first
                 continue
             if not title and label in ("群昵称", "备注"):
                 title = first
                 continue
+            if not level and label == "QQ等级" and any(ch in ICON_PAINTERS for ch in first):
+                level = first
+                continue
+            if not sig and label == "签名":
+                sig = "".join(values)
+                continue
             body.append([label, values])
         if not title:
             title = "资料卡"
-        if subtitle:
-            subtitle = f"QQ {subtitle}"
-        else:
-            subtitle = "MoeMoe Profile Card"
-        return title, subtitle, body
+        return title, qq, level, sig, body
+
+    def _fit_title(self, title: str, level: str) -> tuple[ImageFont.FreeTypeFont, str]:
+        """Pick the largest title font (then truncate) that leaves room for the level badges."""
+        text_x = PAD + AVATAR_D + 52
+        avail = CARD_W - PAD - text_x - 40
+        level_w = self._measure(level, self._font(LEVEL_SIZE)) + 20 if level else 0.0
+        title_max = avail - level_w
+        size = TITLE_SIZE
+        while size > 40:
+            if self._measure(title, self._font(size)) <= title_max:
+                break
+            size -= 2
+        font = self._font(size)
+        if self._measure(title, font) > title_max:
+            title = self._truncate(title, font, title_max)
+        return font, title
+
+    def _header_height(self, title: str, level: str, sig: str) -> int:
+        text_x = PAD + AVATAR_D + 52
+        avail = CARD_W - PAD - text_x - 40
+        title_font, _ = self._fit_title(title, level)
+        title_h = sum(title_font.getmetrics())
+        h = HEADER_TOP_PAD + title_h + 8 + sum(self._font(SUBTITLE_SIZE).getmetrics()) + 6
+        if sig:
+            sig_font = self._font(SIGN_SIZE)
+            n = min(len(self._wrap(sig, sig_font, avail)), 2)
+            h += 12 + n * (sum(sig_font.getmetrics()) + 4)
+        return max(int(h) + 36, AVATAR_D + AVATAR_RING * 2 + 40)
 
     def _load_avatar(self, avatar: bytes) -> Image.Image:
         img = Image.open(BytesIO(avatar)).convert("RGBA")
@@ -407,29 +543,21 @@ class CardMaker:
         img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
         return img.resize((AVATAR_D, AVATAR_D), Image.LANCZOS)
 
-    def _paint_header(self, card: Image.Image) -> None:
-        header = Image.new("RGBA", (CARD_W, HEADER_H))
+    def _paint_header(self, card: Image.Image, header_h: int) -> None:
+        header = Image.new("RGBA", (CARD_W, header_h))
         hdraw = ImageDraw.Draw(header)
-        for row in range(HEADER_H):
+        for row in range(header_h):
             hdraw.line(
                 [(0, row), (CARD_W, row)],
-                fill=(*_mix(HEADER_TOP, HEADER_BOTTOM, row / HEADER_H), 255),
+                fill=(*_mix(HEADER_TOP, HEADER_BOTTOM, row / header_h), 255),
             )
-        # soft decorative blobs, like the logo background
-        blob = Image.new("RGBA", (CARD_W, HEADER_H), (0, 0, 0, 0))
-        bdraw = ImageDraw.Draw(blob)
-        bdraw.ellipse([-120, -140, 260, 200], fill=(255, 255, 255, 46))
-        bdraw.ellipse([CARD_W - 220, HEADER_H - 190, CARD_W + 140, HEADER_H + 160], fill=(255, 255, 255, 42))
-        header.alpha_composite(blob)
-
-        # square off the header's bottom edge so only the card's top corners round it
-        mask = Image.new("L", (CARD_W, HEADER_H), 0)
+        mask = Image.new("L", (CARD_W, header_h), 0)
         mdraw = ImageDraw.Draw(mask)
-        mdraw.rounded_rectangle([0, 0, CARD_W - 1, HEADER_H - 1], RADIUS, fill=255)
-        mdraw.rectangle([0, RADIUS, CARD_W, HEADER_H], fill=255)
+        mdraw.rounded_rectangle([0, 0, CARD_W - 1, header_h - 1], RADIUS, fill=255)
+        mdraw.rectangle([0, RADIUS, CARD_W, header_h], fill=255)
         card.paste(header, (0, 0), mask)
 
-    def _paint_footer(self, card: Image.Image, card_h: int) -> None:
+    def _paint_footer(self, card: Image.Image, card_h: int, fetched_at: datetime | None) -> None:
         footer = Image.new("RGBA", (CARD_W, FOOTER_H), (*FOOTER_BG, 255))
         mask = Image.new("L", (CARD_W, FOOTER_H), 0)
         mdraw = ImageDraw.Draw(mask)
@@ -439,13 +567,14 @@ class CardMaker:
 
         fdraw = ImageDraw.Draw(card)
         font = self._font(FOOTER_SIZE)
-        text = "萌萌资料卡 · MoeMoe Profile Card"
-        text_w = self._measure(text, font)
-        cx = (CARD_W - text_w) / 2
-        cy = card_h - FOOTER_H + (FOOTER_H - self.font_size) / 2 - 2
-        _cat_face(fdraw, cx - 44, card_h - FOOTER_H / 2, 17)
-        fdraw.text((cx, cy), text, font=font, fill=(*FOOTER_TEXT, 255))
-        _heart(fdraw, CARD_W / 2 + text_w / 2 + 40, card_h - FOOTER_H / 2, 11, (255, 111, 165, 220))
+        cy = card_h - FOOTER_H + (FOOTER_H - sum(font.getmetrics())) / 2
+        _cat_face(fdraw, PAD + 12, card_h - FOOTER_H / 2, 15)
+        fdraw.text((PAD + 40, cy), "萌萌资料卡", font=font, fill=(*FOOTER_TEXT, 255))
+        _heart(fdraw, PAD + 44 + self._measure("萌萌资料卡", font) + 14, card_h - FOOTER_H / 2, 8, (255, 111, 165, 200))
+        if fetched_at:
+            time_text = fetched_at.strftime("%Y-%m-%d %H:%M")
+            tw = self._measure(time_text, font)
+            fdraw.text((CARD_W - PAD - tw, cy), time_text, font=font, fill=(*FOOTER_TEXT, 235))
 
     def _paint_header_content(
         self,
@@ -455,48 +584,95 @@ class CardMaker:
         oy: int,
         avatar_img: Image.Image,
         title: str,
-        subtitle: str,
+        qq: str,
+        level: str,
+        sig: str,
+        header_h: int,
     ) -> None:
-        hx, hy = ox, oy
-        # avatar with white ring
-        ax = hx + PAD + AVATAR_D / 2
-        ay = hy + HEADER_H / 2
+        # avatar with white ring, vertically centered
+        ax = ox + PAD + AVATAR_D / 2
+        ay = oy + header_h / 2
         ring_r = AVATAR_D / 2 + AVATAR_RING
-        draw.ellipse(
-            [ax - ring_r, ay - ring_r, ax + ring_r, ay + ring_r],
-            fill=(255, 255, 255, 235),
-        )
+        draw.ellipse([ax - ring_r, ay - ring_r, ax + ring_r, ay + ring_r], fill=(255, 255, 255, 240))
         mask = Image.new("L", (AVATAR_D, AVATAR_D), 0)
         ImageDraw.Draw(mask).ellipse([0, 0, AVATAR_D - 1, AVATAR_D - 1], fill=255)
         img.paste(avatar_img, (int(ax - AVATAR_D / 2), int(ay - AVATAR_D / 2)), mask)
 
-        # title with graceful shrink, then ellipsis truncation as a last resort
-        text_x = hx + PAD + AVATAR_D + 52
-        max_w = CARD_W - PAD - text_x - 60
-        size = TITLE_SIZE
-        while size > 40:
-            font = self._font(size)
-            if self._measure(title, font) <= max_w:
-                break
-            size -= 2
-        font = self._font(size)
-        if self._measure(title, font) > max_w:
-            while title and self._measure(title + "…", font) > max_w:
-                title = title[:-1]
-            title += "…"
-        ascent, descent = font.getmetrics()
-        line_h = ascent + descent
-        title_y = hy + HEADER_H / 2 - line_h - 6
-        self._draw_mixed(img, draw, (text_x, title_y), title, font, (*TITLE_COLOR, 255))
+        text_x = ox + PAD + AVATAR_D + 52
+        avail = CARD_W - PAD - text_x - 40
 
+        # title line: nickname + level badges
+        title_font, title = self._fit_title(title, level)
+        title_h = sum(title_font.getmetrics())
+        level_font = self._font(LEVEL_SIZE)
+        title_y = oy + HEADER_TOP_PAD
+        self._draw_mixed(img, draw, (text_x, title_y), title, title_font, (*TITLE_COLOR, 255))
+        if level:
+            level_lh = sum(level_font.getmetrics())
+            level_y = title_y + (title_h - level_lh) / 2 + 2
+            self._draw_mixed(
+                img, draw, (text_x + self._measure(title, title_font) + 20, level_y),
+                level, level_font, (*TITLE_COLOR, 255),
+            )
+
+        # QQ line
+        sub_y = title_y + title_h + 8
         sub_font = self._font(SUBTITLE_SIZE)
-        self._draw_mixed(img, draw, (text_x + 4, title_y + line_h + 14), subtitle, sub_font, (*SUBTITLE_COLOR, 255))
+        if qq:
+            self._draw_mixed(img, draw, (text_x + 2, sub_y), f"QQ {qq}", sub_font, SUBTITLE_COLOR)
 
-        # decorations
+        # signature line(s)
+        if sig:
+            sig_font = self._font(SIGN_SIZE)
+            sig_y = sub_y + sum(sub_font.getmetrics()) + 12
+            sig_lh = sum(sig_font.getmetrics())
+            lines = self._wrap(sig, sig_font, avail)
+            if len(lines) > 2:
+                lines = lines[:2]
+                lines[1] = self._truncate(lines[1], sig_font, avail)
+            for i, part in enumerate(lines):
+                self._draw_mixed(
+                    img, draw,
+                    (text_x + 2, sig_y + i * (sig_lh + 4)),
+                    f"“{part}”" if len(lines) == 1 else (f"“{part}" if i == 0 else f"{part}”"),
+                    sig_font, (*SIGN_COLOR, 255),
+                )
+
+        # subtle decorations
         sdraw = ImageDraw.Draw(img)
-        _sparkle(sdraw, hx + CARD_W - 96, hy + 52, 20, (255, 255, 255, 210))
-        _sparkle(sdraw, hx + CARD_W - 160, hy + 108, 13, (255, 243, 176, 220))
-        _heart(sdraw, hx + CARD_W - 120, hy + HEADER_H - 56, 13, (255, 255, 255, 190))
+        _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
+        _sparkle(sdraw, ox + CARD_W - 148, oy + 100, 12, (255, 243, 176, 210))
+
+    def _analysis_height(self, analysis: str) -> int:
+        block_w = CARD_W - PAD * 2
+        text_w_limit = block_w - ROW_PAD_X * 2
+        label_font = self._font(FOOTER_SIZE)
+        font = self._font(ANALYSIS_SIZE)
+        label_h = sum(label_font.getmetrics()) + 6
+        n = len(self._wrap(analysis, font, text_w_limit))
+        return 2 * ROW_PAD_V + 12 + label_h + n * (sum(font.getmetrics()) + LINE_GAP)
+
+    def _paint_analysis(self, img: Image.Image, draw: ImageDraw.ImageDraw, ox: int, y: int, analysis: str) -> int:
+        """Draw the LLM comment block; returns the block's bottom y."""
+        block_w = CARD_W - PAD * 2
+        text_w_limit = block_w - ROW_PAD_X * 2
+        label_font = self._font(FOOTER_SIZE)
+        font = self._font(ANALYSIS_SIZE)
+        label_h = sum(label_font.getmetrics())
+        n = len(self._wrap(analysis, font, text_w_limit))
+        block_h = 2 * ROW_PAD_V + 12 + label_h + 6 + n * (sum(font.getmetrics()) + LINE_GAP)
+
+        draw.rounded_rectangle([ox + PAD, y, ox + PAD + block_w, y + block_h], 20, fill=(*ANALYSIS_BG, 255))
+        ty = y + ROW_PAD_V + 12
+        _heart(draw, ox + PAD + ROW_PAD_X + 7, ty + label_h / 2, 9, (255, 111, 165, 230))
+        draw.text(
+            (ox + PAD + ROW_PAD_X + 24, ty), "萌萌锐评 · AI", font=label_font, fill=(*ANALYSIS_LABEL, 255)
+        )
+        ty += label_h + 6
+        for part in self._wrap(analysis, font, text_w_limit):
+            self._draw_mixed(img, draw, (ox + PAD + ROW_PAD_X, ty), part, font, (*TEXT_DARK, 255))
+            ty += sum(font.getmetrics()) + LINE_GAP
+        return y + block_h
 
     # ------------------------------------------------------------ placeholder
     def create_placeholder_avatar(self) -> bytes:

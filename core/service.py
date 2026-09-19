@@ -1,6 +1,6 @@
-import hashlib
-import json
+import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import aiohttp
 from aiocqhttp import CQHttp
@@ -35,6 +35,9 @@ class BoxResult:
 
     display: list[str] = field(default_factory=list)
     image: bytes | None = None
+
+    join_rank: str = ""
+    analysis: str = ""
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -111,30 +114,79 @@ class BoxService:
             desensitize=self.cfg.desensitize,
         )
 
-        return BoxResult(
+        result = BoxResult(
             target_id=target_id,
             group_id=group_id,
             display=display,
         )
 
+        if group_id:
+            result.join_rank = await self._get_join_rank(bot, group_id, target_id)
+        if self.cfg.llm_analysis:
+            result.analysis = await self._get_analysis(target_id, profile.long_nick)
+        return result
+
     async def render_box_image(self, result: BoxResult) -> bytes:
-        """Render or load the cached box card image"""
+        """Render the box card image (fresh every time: the card shows the fetch time)."""
         avatar = await self._get_avatar(result.target_id)
         if not avatar:
             avatar = self.renderer.create_placeholder_avatar()
 
-        digest = self._render_digest(result.display, avatar)
-        cache_name = f"{result.target_id}_{digest}.png"
-        cache_path = self.cfg.temp_dir / cache_name
+        result.image = await asyncio.to_thread(
+            self.renderer.create,
+            avatar,
+            result.display,
+            result.join_rank,
+            result.analysis,
+            datetime.now(),
+        )
+        return result.image
 
-        if cache_path.exists():
-            image = cache_path.read_bytes()
-        else:
-            image = self.renderer.create(avatar, result.display)
-            cache_path.write_bytes(image)
+    async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> str:
+        """Compute the member's join order within the group, e.g. "第 12 位 · 共 345 人"."""
+        try:
+            members = await bot.get_group_member_list(group_id=int(group_id))
+        except Exception as e:
+            logger.warning(f"get_group_member_list failed: {e}")
+            return ""
 
-        result.image = image
-        return image
+        joined = []
+        for m in members:
+            try:
+                join_time = int(m.get("join_time") or 0)
+            except (TypeError, ValueError):
+                continue
+            if join_time > 0:
+                joined.append((join_time, str(m.get("user_id"))))
+        if not joined:
+            return ""
+
+        joined.sort()
+        for idx, (_t, uid) in enumerate(joined, start=1):
+            if uid == target_id:
+                return f"第 {idx} 位 · 共 {len(joined)} 人"
+        return ""
+
+    async def _get_analysis(self, target_id: str, signature: str) -> str:
+        """Ask the current LLM provider for a short comment on the avatar and signature."""
+        provider = self.cfg.context.get_using_provider()
+        if not provider:
+            return ""
+
+        avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={target_id}&spec=640"
+        prompt = (
+            "这是一位QQ用户的头像图片"
+            + (f"，个性签名是：「{signature}」" if signature else "")
+            + "。请根据头像画面和签名内容，用轻松幽默的语气写一句话点评这位用户，不超过45个字。"
+            "直接输出点评内容，不要任何前缀、引号或解释。"
+        )
+        try:
+            response = await provider.text_chat(prompt=prompt, image_urls=[avatar_url])
+            text = (response.completion_text or "").strip()
+            return text[:80]
+        except Exception as e:
+            logger.warning(f"llm analysis failed: {e}")
+            return ""
 
     async def _get_avatar(self, user_id: str) -> bytes | None:
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
@@ -146,13 +198,3 @@ class BoxService:
         except Exception as e:
             logger.error(f"Download avatar failed: {e}")
             return None
-
-    def _render_digest(self, display: list[str], avatar: bytes) -> str:
-        payload = {
-            "display": display,
-            "avatar": hashlib.md5(avatar).hexdigest(),
-            "render": 2,  # bump to invalidate cached cards after renderer redesigns
-        }
-        return hashlib.md5(
-            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()

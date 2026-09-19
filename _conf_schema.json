@@ -129,6 +129,12 @@
         "hint": "对敏感信息进行脱敏处理，一般用不到，正常使用时没有敏感信息",
         "default": true
     },
+    "llm_analysis": {
+        "description": "AI 锐评",
+        "type": "bool",
+        "hint": "开启后用当前 LLM 提供商分析头像和个性签名，并在卡片上展示点评（消耗 token；自动展示新群友时同样会触发）",
+        "default": false
+    },
     "mystery_url": {
         "description": "拓展配置项",
         "hint": "无需填写，仅供开发人员使用",
