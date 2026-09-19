@@ -1,11 +1,9 @@
 import hashlib
 import json
 from dataclasses import dataclass, field
-from io import BytesIO
 
 import aiohttp
 from aiocqhttp import CQHttp
-from PIL import Image
 
 from astrbot.api import logger
 
@@ -123,9 +121,7 @@ class BoxService:
         """Render or load the cached box card image"""
         avatar = await self._get_avatar(result.target_id)
         if not avatar:
-            with BytesIO() as buffer:
-                Image.new("RGB", (640, 640), (255, 255, 255)).save(buffer, format="PNG")
-                avatar = buffer.getvalue()
+            avatar = self.renderer.create_placeholder_avatar()
 
         digest = self._render_digest(result.display, avatar)
         cache_name = f"{result.target_id}_{digest}.png"
@@ -155,6 +151,7 @@ class BoxService:
         payload = {
             "display": display,
             "avatar": hashlib.md5(avatar).hexdigest(),
+            "render": 2,  # bump to invalidate cached cards after renderer redesigns
         }
         return hashlib.md5(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
