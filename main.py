@@ -75,7 +75,7 @@ class BoxPlugin(Star):
         ]
 
         for tid in target_ids:
-            result = await self.box.get_box_info(
+            result = await self.box.fetch_card(
                 event.bot,
                 target_id=str(tid),
                 group_id=event.get_group_id() or "",
@@ -120,10 +120,10 @@ class BoxPlugin(Star):
         group_id = event.get_group_id() or "0"
 
         try:
-            result = await self.box.get_box_info(
+            result = await self.box.fetch_card(
                 event.bot,
-                target_id,
-                group_id,
+                target_id=target_id,
+                group_id=group_id,
                 include_library=real_info,
             )
 
@@ -194,10 +194,10 @@ class BoxPlugin(Star):
         if user_id in self.cfg.protect_ids or user_id == event.get_self_id():
             return
 
-        result = await self.box.get_box_info(
+        result = await self.box.fetch_card(
             event.bot,
-            user_id,
-            group_id,
+            target_id=user_id,
+            group_id=group_id,
             include_library=is_leave or is_kick,
             card_type="join" if is_enter else ("kick" if is_kick else "leave"),
             operator_id=str(raw.get("operator_id") or "") if is_kick else "",
@@ -213,11 +213,10 @@ class BoxPlugin(Star):
         event: AiocqhttpMessageEvent,
         result: BoxResult,
     ):
-        if result.is_fail():
+        if result.is_fail() or not result.image:
             return
 
-        image = await self.box.render_box_image(result)
-        chain: list[BaseMessageComponent] = [Comp.Image.fromBytes(image)]
+        chain: list[BaseMessageComponent] = [Comp.Image.fromBytes(result.image)]
 
         recall_time = self.cfg.recall_time
 

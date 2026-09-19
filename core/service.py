@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 from aiocqhttp import CQHttp
@@ -41,6 +41,7 @@ class BoxResult:
     join_rank: str = ""
     analyses: dict[str, str] = field(default_factory=dict)
     card_type: str = ""  # "" 查询 / "join" 入群 / "leave" 退群 / "kick" 被踢
+    from_cache: bool = False
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -60,6 +61,7 @@ class BoxService:
         self.cfg = cfg
         self.renderer = CardMaker()
         self.store = MemberStore(cfg.data_dir / "member_times.db")
+        self._semaphore = asyncio.Semaphore(max(1, int(cfg.max_concurrent or 1)))
 
     async def get_box_info(
         self,
@@ -235,6 +237,95 @@ class BoxService:
             datetime.now(),
         )
         return result.image
+
+    # ------------------------------------------------------------ 缓存与队列
+    def _cache_lookup(self, group_id: str, user_id: str) -> BoxResult | None:
+        """冷却期内的缓存卡片；过期/缺失/关闭缓存时返回 None。"""
+        cooldown = int(self.cfg.cache_cooldown or 0)
+        if cooldown <= 0:
+            return None
+        try:
+            cached = self.store.get_card_cache(group_id, user_id)
+        except Exception as e:
+            logger.warning(f"[资料卡] 读取卡片缓存失败: {e}")
+            return None
+        if not cached:
+            return None
+        try:
+            fetched_at = datetime.strptime(cached["fetched_at"], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+        if datetime.now() - fetched_at >= timedelta(minutes=cooldown):
+            return None
+        return BoxResult(
+            target_id=user_id,
+            group_id=group_id,
+            display=list(cached["display"]),
+            image=cached["image"],
+            level_text=cached["level_text"],
+            join_rank=cached["join_rank"],
+            analyses=dict(cached["analyses"]),
+            card_type=cached["card_type"],
+            from_cache=True,
+        )
+
+    def _cache_store(self, group_id: str, user_id: str, result: BoxResult) -> None:
+        cooldown = int(self.cfg.cache_cooldown or 0)
+        if cooldown <= 0 or result.is_fail() or result.image is None:
+            return
+        now = datetime.now()
+        try:
+            self.store.put_card_cache(
+                group_id,
+                user_id,
+                now.strftime("%Y-%m-%d %H:%M:%S"),
+                result.display,
+                result.level_text,
+                result.join_rank,
+                result.analyses,
+                result.card_type,
+                result.image,
+                stale_before=(now - timedelta(minutes=cooldown)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception as e:
+            logger.warning(f"[资料卡] 写入卡片缓存失败: {e}")
+
+    async def fetch_card(
+        self,
+        bot: CQHttp,
+        target_id: str,
+        group_id: str,
+        include_library: bool = False,
+        card_type: str = "",
+        operator_id: str = "",
+    ) -> BoxResult:
+        """获取并渲染一张卡片：冷却期内直接返回缓存（不排队），否则排队实时获取。
+
+        事件卡（入群/退群/被踢）不受冷却限制，始终实时获取并刷新缓存。
+        """
+        if card_type == "":
+            cached = self._cache_lookup(group_id, target_id)
+            if cached:
+                return cached
+        async with self._semaphore:
+            if card_type == "":
+                # 排队期间其他任务可能已刷新过同一目标，再查一次
+                cached = self._cache_lookup(group_id, target_id)
+                if cached:
+                    return cached
+            result = await self.get_box_info(
+                bot,
+                target_id,
+                group_id,
+                include_library=include_library,
+                card_type=card_type,
+                operator_id=operator_id,
+            )
+            if result.is_fail():
+                return result
+            await self.render_box_image(result)
+            self._cache_store(group_id, target_id, result)
+            return result
 
     async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> str:
         """Compute the member's join order within the group, e.g. "第 12 位 · 共 345 人"."""

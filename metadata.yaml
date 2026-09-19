@@ -2,7 +2,7 @@ name: astrbot_plugin_box
 display_name: 萌萌资料卡
 desc: 遵循OnebotV11协议，获取QQ用户主页资料，以萌萌卡片图片展示
 help: 指令「/资料卡 @群友」（别名 盒/开盒/box）；可在配置中开启自动展示新群友、主动退群成员的资料卡
-version: v0.5.0
+version: v0.6.0
 author: windExplorer
 repo: https://github.com/windExplorer/astrbot_plugin_box
 support_platforms:

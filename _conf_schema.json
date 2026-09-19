@@ -167,6 +167,28 @@
         "hint": "用本地 SQLite 数据库记录群成员入群、退群的精确时间（精确到秒）。卡片上的加群时间优先使用库里的精确值；退群成员的卡片也能显示加群/退群时间",
         "default": true
     },
+    "cache_cooldown": {
+        "description": "资料卡缓存冷却（分钟）",
+        "type": "int",
+        "hint": "同一群同一用户在冷却时间内再次获取时，直接使用数据库保存的上一张卡片，不重新请求接口和 LLM（入群/退群/被踢事件卡不受冷却限制，始终实时获取并刷新缓存）；0 为关闭",
+        "slider": {
+            "min": 0,
+            "max": 720,
+            "step": 1
+        },
+        "default": 15
+    },
+    "max_concurrent": {
+        "description": "并发获取数",
+        "type": "int",
+        "hint": "全局限流：所有群所有用户同时最多 N 个资料获取任务在请求接口/LLM，其余按顺序排队；走缓存的不排队",
+        "slider": {
+            "min": 1,
+            "max": 10,
+            "step": 1
+        },
+        "default": 1
+    },
     "mystery_url": {
         "description": "拓展配置项",
         "hint": "无需填写，仅供开发人员使用",

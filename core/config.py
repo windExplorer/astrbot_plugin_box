@@ -111,6 +111,8 @@ class PluginConfig(ConfigNode):
     desensitize: bool
     ai_analysis: AIAnalysisConfig
     record_join_leave: bool
+    cache_cooldown: int
+    max_concurrent: int
     mystery_url: str
     mystery_cookies: str
 
