@@ -27,6 +27,52 @@ except Exception:  # pragma: no cover
     request = None  # type: ignore
 
 ROUTE_PREFIX = "/astrbot_plugin_box"
+
+# 面板可读写的插件配置键白名单（键 -> 类型）
+_CONFIG_FIELDS = {
+    "only_admin": "bool",
+    "protect_ids": "strlist",
+    "record_join_leave": "bool",
+    "init_backfill": "bool",
+    "cache_cooldown": "int",
+    "max_concurrent": "int",
+    "desensitize": "bool",
+    "recall_time": "int",
+    "welcome_enabled": "bool",
+    "welcome_text": "str",
+    "welcome_images": "strlist",
+    "welcome_ai_enabled": "bool",
+    "welcome_ai_prompt": "str",
+    "welcome_ai_retry": "int",
+    "welcome_private_rules": "bool",
+    "group_rules": "str",
+    "black_groups": "strlist",
+    "display_options": "strlist",
+    "autobox.enter": "bool",
+    "autobox.exit": "bool",
+    "autobox.white_groups": "strlist",
+    "ai_analysis.avatar_analysis": "bool",
+    "ai_analysis.signature_analysis": "bool",
+    "ai_analysis.overall_analysis": "bool",
+    "ai_analysis.event_analysis": "bool",
+}
+
+
+def _coerce(value: Any, kind: str) -> Any:
+    if kind == "bool":
+        return bool(value)
+    if kind == "int":
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    if kind == "str":
+        return str(value if value is not None else "")
+    if kind == "strlist":
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        return []
+    return value
 FMT = "%Y-%m-%d %H:%M:%S"
 GROUP_SLEEP_SECONDS = 1  # 群与群之间稍作停歇，降低接口压力
 
@@ -335,64 +381,19 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         return _ok({"selection": plugin.box.get_model_selection()})
 
     # ------------------------------------------------------ 插件配置读写
-    _CONFIG_FIELDS: dict[str, str] = {
-        "only_admin": "bool",
-        "protect_ids": "strlist",
-        "record_join_leave": "bool",
-        "init_backfill": "bool",
-        "cache_cooldown": "int",
-        "max_concurrent": "int",
-        "desensitize": "bool",
-        "recall_time": "int",
-        "welcome_enabled": "bool",
-        "welcome_text": "str",
-        "welcome_images": "strlist",
-        "welcome_ai_enabled": "bool",
-        "welcome_ai_prompt": "str",
-        "welcome_ai_retry": "int",
-        "welcome_private_rules": "bool",
-        "group_rules": "str",
-        "black_groups": "strlist",
-        "display_options": "strlist",
-        "autobox.enter": "bool",
-        "autobox.exit": "bool",
-        "autobox.white_groups": "strlist",
-        "ai_analysis.avatar_analysis": "bool",
-        "ai_analysis.signature_analysis": "bool",
-        "ai_analysis.overall_analysis": "bool",
-        "ai_analysis.event_analysis": "bool",
-    }
-
-    @staticmethod
-    def _coerce(value: Any, kind: str) -> Any:
-        if kind == "bool":
-            return bool(value)
-        if kind == "int":
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return 0
-        if kind == "str":
-            return str(value if value is not None else "")
-        if kind == "strlist":
-            if isinstance(value, list):
-                return [str(v).strip() for v in value if str(v).strip()]
-            return []
-        return value
-
     async def h_config_get(*_args, **_kwargs) -> dict:
         raw = plugin.cfg._data
         autobox = raw.get("autobox") if isinstance(raw.get("autobox"), dict) else {}
         ai_sub = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
         values = {}
-        for key, kind in plugin._backfiller._CONFIG_FIELDS.items():
+        for key, kind in _CONFIG_FIELDS.items():
             if "." in key:
                 head, leaf = key.split(".", 1)
                 node = autobox if head == "autobox" else ai_sub
                 current = node.get(leaf) if isinstance(node, dict) else None
             else:
                 current = raw.get(key)
-            values[key] = plugin._backfiller._coerce(current, kind)
+            values[key] = _coerce(current, kind)
         return _ok({"values": values})
 
     async def h_config_set(*_args, **_kwargs) -> dict:
@@ -400,13 +401,13 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         values = body.get("values")
         if not isinstance(values, dict):
             return _err("缺少 values 字段")
-        fields = plugin._backfiller._CONFIG_FIELDS
+        fields = _CONFIG_FIELDS
         changed = []
         for key, value in values.items():
             kind = fields.get(key)
             if not kind:
                 continue  # 白名单外的键直接忽略
-            coerced = plugin._backfiller._coerce(value, kind)
+            coerced = _coerce(value, kind)
             if "." in key:
                 head, leaf = key.split(".", 1)
                 node = getattr(plugin.cfg, head)

@@ -156,17 +156,6 @@
               </n-space>
             </n-space>
           </n-card>
-          <n-card title="可用对话模型提供商" size="small">
-            <template #header-extra>
-              <n-button size="small" @click="loadModels()">🔄 刷新</n-button>
-            </template>
-            <n-data-table
-              :columns="modelColumns"
-              :data="llmItems"
-              :row-key="p => p.id"
-              :loading="modelsLoading"
-              size="small"></n-data-table>
-          </n-card>
         </template>
       </n-layout-content>
     </n-layout>
@@ -511,27 +500,6 @@
               return h(NS.NTag, { size: "small", type: "success", bordered: false }, { default: function () { return "已记录"; } });
             return h(NS.NTag, { size: "small", type: "warning", bordered: false },
               { default: function () { return !m.info_recorded ? "缺群内信息" : "缺入群时间"; } });
-          } }
-      ];
-
-      var modelColumns = [
-        { title: "提供商", key: "label", render: function (p) {
-            return h("div", { style: "display:flex;align-items:center;gap:10px" }, [
-              h("span", { style: "font-weight:600" }, p.label),
-              p.is_default ? h(NS.NTag, { size: "tiny", type: "success", bordered: false }, { default: function () { return "系统默认"; } }) : null,
-              h("span", { class: "gid" }, p.id)
-            ]);
-          } },
-        { title: "输入模态", key: "modalities", width: 200, render: function (p) {
-            var mods = p.modalities || [];
-            if (!mods.length) return h("span", { class: "muted" }, "—");
-            return h(NS.NSpace, { size: 4 }, {
-              default: function () {
-                return mods.map(function (m) {
-                  return h(NS.NTag, { size: "tiny", bordered: false }, { default: function () { return m; } });
-                });
-              }
-            });
           } }
       ];
 
