@@ -3,265 +3,371 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>成员数据面板</title>
+<title>成员数据面板 · 萌萌资料卡</title>
+<script src="assets/vue.global.prod.js"></script>
+<script src="assets/naive-ui.min.js"></script>
 <style>
-  :root {
-    --bg: #fff7fa; --card: #ffffff; --text: #4a3b47; --muted: #a8889a;
-    --accent: #d65492; --accent-soft: #ffe8f1; --line: #f5dce8;
-    --ok: #2f9e63; --ok-soft: #e3f6ec; --warn: #d0722f; --warn-soft: #fdf0e3;
-  }
-  body.dark {
-    --bg: #2a2230; --card: #372c3f; --text: #f0e4ec; --muted: #a58ba0;
-    --accent: #f088bd; --accent-soft: #463449; --line: #4d3d56;
-    --ok: #6fd3a0; --ok-soft: #2e4237; --warn: #e8a76d; --warn-soft: #463829;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
-    font-family: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px;
-  }
-  header h1 { margin: 0 0 4px; font-size: 20px; color: var(--accent); }
-  header .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 12px 14px; margin-bottom: 12px;
-  }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-  button {
-    border: 1px solid var(--line); background: var(--card); color: var(--text);
-    border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: 13px;
-  }
-  button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.danger { color: #d0455c; border-color: #eab8c2; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  #statusBar { font-size: 13px; min-height: 20px; margin-bottom: 10px; color: var(--muted); }
-  #statusBar b { color: var(--accent); }
-  .bar { height: 8px; background: var(--accent-soft); border-radius: 4px; overflow: hidden; margin-top: 6px; }
-  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
-  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
-  td.num { font-variant-numeric: tabular-nums; }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
-  .pill.ok { background: var(--ok-soft); color: var(--ok); }
-  .pill.warn { background: var(--warn-soft); color: var(--warn); }
-  .muted { color: var(--muted); }
-  .gname { font-weight: 600; }
-  .gid { color: var(--muted); font-size: 12px; }
-  .progress-cell { min-width: 140px; }
-  .rowbtn { display: flex; gap: 6px; }
-  #drawer h2 { font-size: 16px; margin: 0 0 8px; }
-  .drawer-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-  .drawer-head select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
-  .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--muted); font-size: 13px; }
-  #err { color: #d0455c; font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
-  .notice { padding: 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); }
+  html, body, #app { margin: 0; padding: 0; height: 100%; }
+  [v-cloak] { display: none; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 18px 20px 10px; font-weight: 700; font-size: 15px; }
+  .brand .logo { font-size: 20px; }
+  .sub { padding: 0 20px 12px; opacity: .55; font-size: 12px; }
+  .gid { opacity: .5; font-size: 12px; }
+  .avatar-cell { display: flex; align-items: center; gap: 10px; }
+  .muted { opacity: .55; font-size: 12px; }
+  .tip { margin-top: 10px; font-size: 13px; opacity: .75; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🌸 成员数据面板</h1>
-  <div class="sub">萌萌资料卡 · 查看各群成员资料记录情况，支持一键回填（退群/被踢卡的信息来源）</div>
-</header>
+<div id="app" v-cloak>
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides" style="height:100%">
+    <n-message-provider>
+      <n-layout has-sider style="height:100%">
+        <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="190" show-trigger>
+          <div class="brand"><span class="logo">🌸</span><span v-if="!collapsed">萌萌资料卡</span></div>
+          <div class="sub" v-if="!collapsed">成员数据面板</div>
+          <n-menu :value="activePage" :options="menuOptions" @update:value="onMenuUpdate" />
+        </n-layout-sider>
+        <n-layout-content content-style="padding:20px;">
 
-<div class="card" id="statusCard" hidden>
-  <div id="statusBar"></div>
-  <div class="bar"><i id="statusBarFill" style="width:0%"></i></div>
+          <!-- ═══════════ 概览 ═══════════ -->
+          <template v-if="activePage === 'overview'">
+            <n-h2>概览</n-h2>
+            <n-grid :x-gap="12" :y-gap="12" :cols="4">
+              <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length" /></n-card></n-gi>
+              <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers" /></n-card></n-gi>
+              <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded" /></n-card></n-gi>
+              <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded" /></n-card></n-gi>
+            </n-grid>
+
+            <n-card title="成员资料回填" size="small" style="margin-top:16px">
+              <template #header-extra>
+                <n-tag :type="backfill.running ? 'info' : (backfill.errors ? 'error' : 'default')" size="small">
+                  {{ backfill.running ? '进行中' : (backfill.errors ? '有错误' : '空闲') }}
+                </n-tag>
+              </template>
+              <n-space vertical size="large">
+                <n-space>
+                  <n-button type="primary" :loading="backfill.running" @click="startBackfill('')">📖 一键读取全部群</n-button>
+                  <n-button :disabled="backfill.running" @click="refresh()">🔄 刷新数据</n-button>
+                  <n-button v-if="backfill.running" quaternary type="error" @click="cancelBackfill()">取消任务</n-button>
+                </n-space>
+                <n-progress
+                  type="line"
+                  :percentage="backfillPct"
+                  :status="backfill.errors ? 'error' : (backfill.running ? 'default' : 'success')"
+                  :height="12" :border-radius="6" :show-indicator="false" />
+                <n-text depth="3">
+                  <template v-if="backfill.running">
+                    正在读取：{{ backfill.current_group || '…' }}（{{ backfill.done_groups }}/{{ backfill.total_groups }} 群，已记录 {{ backfill.recorded_members }} 人）
+                  </template>
+                  <template v-else-if="backfill.finished_at">
+                    上次完成：{{ backfill.finished_at }} · {{ backfill.done_groups }}/{{ backfill.total_groups }} 群 · 记录 {{ backfill.recorded_members }} 人
+                    <template v-if="backfill.errors"> · 错误 {{ backfill.errors }}：{{ backfill.last_error }}</template>
+                  </template>
+                  <template v-else>尚未执行回填。读取后，退群/被踢卡的加群时间、在群时长、群等级、群头衔、入群排位都会更完整。</template>
+                </n-text>
+              </n-space>
+            </n-card>
+          </template>
+
+          <!-- ═══════════ 群数据 ═══════════ -->
+          <template v-else-if="activePage === 'groups'">
+            <n-card title="群数据" size="small">
+              <template #header-extra>
+                <n-space>
+                  <n-button size="small" :loading="backfill.running" @click="startBackfill('')">📖 读取全部群</n-button>
+                  <n-button size="small" @click="refresh()">🔄 刷新</n-button>
+                </n-space>
+              </template>
+              <n-data-table
+                :columns="groupColumns"
+                :data="groups"
+                :pagination="groupPagination"
+                :row-key="g => g.group_id"
+                :loading="loading"
+                size="small" />
+            </n-card>
+          </template>
+
+          <!-- ═══════════ 预留扩展页 ═══════════ -->
+          <template v-else>
+            <n-card :title="menuLabel" size="small">
+              <n-empty description="该页面预留扩展，敬请期待。" />
+            </n-card>
+          </template>
+        </n-layout-content>
+      </n-layout>
+
+      <!-- ═══════════ 成员详情抽屉 ═══════════ -->
+      <n-drawer v-model:show="drawerShow" :width="780" placement="right">
+        <n-drawer-content :title="drawerTitle" closable>
+          <n-space vertical size="large">
+            <n-space align="center" :wrap="false">
+              <n-select v-model:value="memberFilter" :options="filterOptions" size="small" style="width:170px" />
+              <n-button size="small" :loading="memberLoading" @click="loadMembers(currentGid)">🔄 刷新列表</n-button>
+              <n-text depth="3">{{ memberSummary }}</n-text>
+            </n-space>
+            <n-data-table
+              :columns="memberColumns"
+              :data="filteredMembers"
+              :pagination="memberPagination"
+              :row-key="m => m.user_id"
+              :loading="memberLoading"
+              size="small" />
+          </n-space>
+        </n-drawer-content>
+      </n-drawer>
+    </n-message-provider>
+  </n-config-provider>
 </div>
-
-<div class="actions">
-  <button id="btnRefresh">🔄 刷新</button>
-  <button id="btnAll" class="primary">📖 一键读取全部群</button>
-  <button id="btnCancel" class="danger" hidden>✕ 取消任务</button>
-</div>
-
-<div id="groups"></div>
-
-<div class="card" id="drawer" hidden>
-  <div class="drawer-head">
-    <h2 id="drawerTitle">成员列表</h2>
-    <select id="filter">
-      <option value="all">全部成员</option>
-      <option value="unrecorded">仅看缺记录</option>
-    </select>
-    <span style="flex:1"></span>
-    <button id="btnClose">收起</button>
-  </div>
-  <div id="memberInfo" class="muted" style="margin-bottom:6px"></div>
-  <div style="overflow-x:auto">
-    <table>
-      <thead><tr>
-        <th>QQ 号</th><th>昵称 / 群昵称</th><th>群头衔</th><th>群等级</th>
-        <th>入群时间（记录）</th><th>状态</th>
-      </tr></thead>
-      <tbody id="memberRows"></tbody>
-    </table>
-  </div>
-  <div class="pager">
-    <button id="pgPrev">上一页</button>
-    <span id="pgInfo"></span>
-    <button id="pgNext">下一页</button>
-  </div>
-</div>
-
-<div id="err"></div>
 
 <script>
 (function () {
   "use strict";
   var PAGE_SIZE = 100;
-  var bridge = null, groups = [], members = [], memberFilter = "all",
-      page = 0, currentGid = "", currentName = "", pollTimer = null;
+  var bridge = null; // 桥接就绪后赋值（setup 在其后才会 mount）
+  var { createApp, h, ref, computed, onMounted } = Vue;
 
-  var $ = function (id) { return document.getElementById(id); };
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
-  function fail(msg) { $("err").textContent = msg || ""; }
-  function pill(ok, okText, warnText) {
-    return '<span class="pill ' + (ok ? "ok" : "warn") + '">' + (ok ? okText : warnText) + "</span>";
-  }
+  function groupAvatarUrl(gid) { return "https://p.qlogo.cn/gh/" + gid + "/" + gid + "/140"; }
+  function memberAvatarUrl(uid) { return "https://q1.qlogo.cn/g?b=qq&nk=" + uid + "&s=40"; }
 
-  function waitBridge(timeoutMs) {
-    return new Promise(function (resolve, reject) {
-      var start = Date.now();
-      (function poll() {
-        var b = window.AstrBotPluginPage;
-        if (b && typeof b.apiGet === "function") return resolve(b);
-        if (Date.now() - start > (timeoutMs || 4000))
-          return reject(new Error("未检测到 AstrBot 插件 Page 桥接，请从 AstrBot 后台的插件拓展页打开本页面"));
-        setTimeout(poll, 120);
-      })();
-    });
-  }
+  var App = {
+    setup: function () {
+      var NS = naive;
+      var isDark = ref(false);
+      var theme = computed(function () { return isDark.value ? NS.darkTheme : null; });
+      var themeOverrides = {
+        common: { primaryColor: "#e0679c", primaryColorHover: "#eb8cb4", primaryColorPressed: "#d65492",
+                  primaryColorSuppl: "#e0679c", borderRadius: "8px" }
+      };
 
-  function renderGroups() {
-    if (!groups.length) {
-      $("groups").innerHTML = '<div class="card muted">尚未获取到群列表（机器人可能还没连上适配器），稍后点「刷新」重试。</div>';
-      return;
-    }
-    var html = "";
-    groups.forEach(function (g) {
-      var total = g.member_count || 0;
-      var info = g.info_recorded || 0;
-      var pct = total ? Math.round(info * 100 / total) : 100;
-      var unrec = Math.max(total - info, 0);
-      html += '<div class="card">' +
-        '<table><tr><td style="width:40%">' +
-          '<div class="gname">' + esc(g.group_name || "未命名群") + '</div>' +
-          '<div class="gid">' + esc(g.group_id) + '</div>' +
-        '</td><td class="num">' + total + ' 人</td>' +
-        '<td class="progress-cell">' +
-          '<div class="muted">已记录 ' + info + ' / ' + total + (unrec ? '（缺 ' + unrec + '）' : '（齐啦）') + '</div>' +
-          '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
-        '</td>' +
-        '<td>' + pill(info >= total && total > 0, "已记录", "缺记录") + '</td>' +
-        '<td><div class="rowbtn">' +
-          '<button onclick="PAGE.backfill(\'' + esc(g.group_id) + '\')">读取该群</button>' +
-          '<button onclick="PAGE.members(\'' + esc(g.group_id) + '\', \'' + esc(g.group_name || "") + '\')">查看成员</button>' +
-        '</div></td></tr></table></div>';
-    });
-    $("groups").innerHTML = html;
-  }
+      var loading = ref(false);
+      var groups = ref([]);
+      var backfill = ref({});
+      var activePage = ref("overview");
+      var collapsed = ref(false);
 
-  function renderStatus(st) {
-    var running = st.running;
-    $("statusCard").hidden = !(running || st.total_groups);
-    $("btnCancel").hidden = !running;
-    $("btnAll").disabled = running;
-    if (!running && st.total_groups) {
-      $("statusBar").innerHTML = "上次读取：<b>" + esc(st.finished_at || "") + "</b>，完成 " +
-        st.done_groups + "/" + st.total_groups + " 群，记录 " + st.recorded_members + " 名成员" +
-        (st.errors ? '，<span style="color:#d0455c">错误 ' + st.errors + '（' + esc(st.last_error) + '）</span>' : "");
-      $("statusBarFill").style.width = "100%";
-      return;
-    }
-    if (running) {
-      var pct = st.total_groups ? Math.round(st.done_groups * 100 / st.total_groups) : 0;
-      $("statusBar").innerHTML = "正在读取：<b>" + esc(st.current_group || "…") + "</b>（" +
-        st.done_groups + "/" + st.total_groups + " 群，已记录 " + st.recorded_members + " 人" +
-        (st.errors ? "，错误 " + st.errors : "") + "）";
-      $("statusBarFill").style.width = pct + "%";
-    }
-  }
+      var drawerShow = ref(false);
+      var drawerTitle = ref("成员列表");
+      var currentGid = ref("");
+      var members = ref([]);
+      var memberLoading = ref(false);
+      var memberFilter = ref("all");
 
-  function pollStatus() {
-    if (pollTimer) return;
-    pollTimer = setInterval(function () {
-      bridge.apiGet("backfill/status").then(function (st) {
-        renderStatus(st);
-        if (!st.running && st.finished_at) { refresh(); }
-      }).catch(function () {});
-    }, 1500);
-  }
+      var groupPagination = { pageSize: 10 };
+      var memberPagination = { pageSize: 20 };
+      var filterOptions = [
+        { label: "全部成员", value: "all" },
+        { label: "仅看缺记录", value: "unrecorded" }
+      ];
 
-  function refresh() {
-    return bridge.apiGet("groups").then(function (d) {
-      groups = d.groups || [];
-      renderGroups();
-      renderStatus(d.backfill || {});
-    }).catch(function (e) { fail("加载失败：" + e.message); });
-  }
+      var menuOptions = [
+        { label: "🏠 概览", key: "overview" },
+        { label: "👥 群数据", key: "groups" }
+        // 在此数组中追加 { label, key } 即可扩展新页面（配合下方模板分支）
+      ];
+      var menuLabel = computed(function () {
+        var hit = menuOptions.find(function (o) { return o.key === activePage.value; });
+        return hit ? hit.label.replace(/^\S+\s/, "") : activePage.value;
+      });
 
-  function renderMembers() {
-    var list = members;
-    if (memberFilter === "unrecorded") {
-      list = members.filter(function (m) { return !m.info_recorded || !m.join_recorded; });
-    }
-    var pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-    if (page >= pages) page = pages - 1;
-    var slice = list.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-    var html = "";
-    if (!slice.length) html = '<tr><td colspan="6" class="muted">没有符合条件的成员</td></tr>';
-    slice.forEach(function (m) {
-      var ok = m.info_recorded && m.join_recorded;
-      html += "<tr><td class='num'>" + esc(m.user_id) + "</td><td>" + esc(m.name) + "</td><td>" +
-        esc(m.title || "—") + "</td><td class='num'>" + esc(m.level || "—") + "</td><td>" +
-        esc(m.join_time || "—") + "</td><td>" +
-        pill(!!ok, "已记录", (!m.join_recorded ? "缺入群时间" : "缺群内信息")) + "</td></tr>";
-    });
-    $("memberRows").innerHTML = html;
-    $("pgInfo").textContent = "第 " + (page + 1) + " / " + pages + " 页 · 共 " + list.length + " 人";
-    $("memberInfo").textContent = currentName + "（" + currentGid + "）共 " + members.length + " 人，缺记录 " +
-      members.filter(function (m) { return !m.info_recorded || !m.join_recorded; }).length + " 人";
-  }
+      var totalMembers = computed(function () {
+        return groups.value.reduce(function (s, g) { return s + (g.member_count || 0); }, 0);
+      });
+      var totalInfoRecorded = computed(function () {
+        return groups.value.reduce(function (s, g) { return s + (g.info_recorded || 0); }, 0);
+      });
+      var totalJoinRecorded = computed(function () {
+        return groups.value.reduce(function (s, g) { return s + (g.join_recorded || 0); }, 0);
+      });
+      var backfillPct = computed(function () {
+        var st = backfill.value;
+        if (!st.total_groups) return st.running ? 8 : 0;
+        return Math.round((st.done_groups || 0) * 100 / st.total_groups);
+      });
 
-  window.PAGE = {
-    backfill: function (gid) {
-      bridge.apiPost("backfill", gid ? { group_id: gid } : {})
-        .then(function () { pollStatus(); })
-        .catch(function (e) { fail(e.message); });
-    },
-    members: function (gid, name) {
-      currentGid = gid; currentName = name; page = 0;
-      $("drawer").hidden = false;
-      $("drawerTitle").textContent = "成员列表 · " + (name || gid);
-      $("memberRows").innerHTML = '<tr><td colspan="6" class="muted">加载中…</td></tr>';
-      bridge.apiGet("group/members", { group_id: gid }).then(function (d) {
-        members = d.members || [];
-        renderMembers();
-      }).catch(function (e) { fail(e.message); });
+      var filteredMembers = computed(function () {
+        if (memberFilter.value === "unrecorded") {
+          return members.value.filter(function (m) { return !m.info_recorded || !m.join_recorded; });
+        }
+        return members.value;
+      });
+      var memberSummary = computed(function () {
+        var unrec = members.value.filter(function (m) { return !m.info_recorded || !m.join_recorded; }).length;
+        return "共 " + members.value.length + " 人，缺记录 " + unrec + " 人";
+      });
+
+      // ───────────────────────── 数据加载 ─────────────────────────
+      function refresh() {
+        loading.value = true;
+        return bridge.apiGet("groups", { _t: Date.now() }).then(function (d) {
+          groups.value = d.groups || [];
+          backfill.value = d.backfill || {};
+        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
+          .finally(function () { loading.value = false; });
+      }
+
+      function loadMembers(gid) {
+        if (!gid) return;
+        memberLoading.value = true;
+        return bridge.apiGet("group/members", { group_id: gid, _t: Date.now() }).then(function (d) {
+          members.value = d.members || [];
+        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
+          .finally(function () { memberLoading.value = false; });
+      }
+
+      function openMembers(g) {
+        currentGid.value = g.group_id;
+        drawerTitle.value = "成员列表 · " + (g.group_name || g.group_id);
+        drawerShow.value = true;
+        loadMembers(g.group_id);
+      }
+
+      function startBackfill(gid) {
+        return bridge.apiPost("backfill", gid ? { group_id: gid } : {})
+          .then(pollOnce).catch(function (e) { window.__panelFail && window.__panelFail(e.message); });
+      }
+      function cancelBackfill() {
+        bridge.apiPost("backfill/cancel", {}).then(pollOnce).catch(function () {});
+      }
+
+      function pollOnce() {
+        return bridge.apiGet("backfill/status").then(function (st) {
+          var wasRunning = backfill.value.running;
+          backfill.value = st;
+          if (wasRunning && !st.running) {
+            // 读取刚结束：刷新统计 + 当前打开的成员抽屉
+            refresh();
+            if (drawerShow.value && currentGid.value) loadMembers(currentGid.value);
+          }
+          if (st.running) schedulePoll();
+        }).catch(function () {});
+      }
+      var pollScheduled = false;
+      function schedulePoll() {
+        if (pollScheduled) return;
+        pollScheduled = true;
+        setTimeout(function () { pollScheduled = false; pollOnce(); }, 1500);
+      }
+
+      // ───────────────────────── 表格列 ─────────────────────────
+      var groupColumns = [
+        { title: "群", key: "group_name", render: function (g) {
+            return h("div", { style: "display:flex;align-items:center;gap:10px" }, [
+              h(NS.NAvatar, { src: groupAvatarUrl(g.group_id), size: 38, round: true,
+                fallback: function () { return h("div", { style: "width:100%;text-align:center" }, (g.group_name || "群").slice(0, 1)); } }),
+              h("div", null, [
+                h("div", { style: "font-weight:600" }, g.group_name || "未命名群"),
+                h("div", { class: "gid" }, g.group_id)
+              ])
+            ]);
+          } },
+        { title: "群人数", key: "member_count", width: 90, render: function (g) { return String(g.member_count || 0); } },
+        { title: "群内信息记录", key: "info_recorded", width: 170, render: function (g) {
+            var total = g.member_count || 0;
+            var pct = total ? Math.round((g.info_recorded || 0) * 100 / total) : 100;
+            return h("div", null, [
+              h("div", { style: "margin-bottom:4px" }, g.info_recorded + " / " + total),
+              h(NS.NProgress, { type: "line", percentage: pct, showIndicator: false, height: 7, borderRadius: 4,
+                                status: pct >= 100 ? "success" : "default" })
+            ]);
+          } },
+        { title: "入群时间记录", key: "join_recorded", width: 110, render: function (g) { return String(g.join_recorded || 0); } },
+        { title: "状态", key: "state", width: 100, render: function (g) {
+            var total = g.member_count || 0;
+            var unrec = Math.max(total - (g.info_recorded || 0), 0);
+            return h(NS.NTag, { size: "small", type: unrec ? "warning" : "success", bordered: false },
+                     { default: function () { return unrec ? "缺 " + unrec : "已齐全"; } });
+          } },
+        { title: "操作", key: "actions", width: 190, render: function (g) {
+            return h(NS.NSpace, { size: 6 }, {
+              default: function () { return [
+                h(NS.NButton, { size: "tiny", type: "primary", secondary: true,
+                                loading: backfill.value.running && backfill.value.current_group.indexOf("(" + g.group_id + ")") >= 0,
+                                onClick: function () { startBackfill(g.group_id); } }, { default: function () { return "读取该群"; } }),
+                h(NS.NButton, { size: "tiny", onClick: function () { openMembers(g); } }, { default: function () { return "查看成员"; } })
+              ]; }
+            });
+          } }
+      ];
+
+      var memberColumns = [
+        { title: "成员", key: "name", render: function (m) {
+            return h("div", { style: "display:flex;align-items:center;gap:8px" }, [
+              h(NS.NAvatar, { src: memberAvatarUrl(m.user_id), size: 30, round: true,
+                fallback: function () { return h("div", { style: "width:100%;text-align:center" }, (m.name || "?").slice(0, 1)); } }),
+              h("span", null, m.name)
+            ]);
+          } },
+        { title: "QQ 号", key: "user_id", width: 120 },
+        { title: "群头衔", key: "title", width: 120, render: function (m) { return m.title || "—"; } },
+        { title: "群等级", key: "level", width: 80, render: function (m) { return m.level || "—"; } },
+        { title: "入群时间（记录）", key: "join_time", width: 170, render: function (m) {
+            return m.join_time || h("span", { class: "muted" }, "接口未提供");
+          } },
+        { title: "状态", key: "state", width: 110, render: function (m) {
+            if (m.info_recorded && m.join_recorded)
+              return h(NS.NTag, { size: "small", type: "success", bordered: false }, { default: function () { return "已记录"; } });
+            return h(NS.NTag, { size: "small", type: "warning", bordered: false },
+              { default: function () { return !m.info_recorded ? "缺群内信息" : "缺入群时间"; } });
+          } }
+      ];
+
+      function onMenuUpdate(key) { activePage.value = key; }
+
+      onMounted(function () {
+        try {
+          var ctx = window.AstrBotPluginPage && window.AstrBotPluginPage.getContext &&
+                    window.AstrBotPluginPage.getContext();
+          if (ctx && typeof ctx.isDark === "boolean") { isDark.value = ctx.isDark; return; }
+        } catch (e) { /* sandbox 下安全忽略 */ }
+        if (window.matchMedia) {
+          isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          window.matchMedia("(prefers-color-scheme: dark)").addEventListener &&
+            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) { isDark.value = e.matches; });
+        }
+      });
+
+      return {
+        theme: theme, themeOverrides: themeOverrides, collapsed: collapsed,
+        activePage: activePage, menuOptions: menuOptions, menuLabel: menuLabel, onMenuUpdate: onMenuUpdate,
+        loading: loading, groups: groups, totalMembers: totalMembers,
+        totalInfoRecorded: totalInfoRecorded, totalJoinRecorded: totalJoinRecorded,
+        backfill: backfill, backfillPct: backfillPct,
+        startBackfill: startBackfill, cancelBackfill: cancelBackfill, refresh: refresh,
+        groupColumns: groupColumns, groupPagination: groupPagination,
+        drawerShow: drawerShow, drawerTitle: drawerTitle,
+        memberFilter: memberFilter, filterOptions: filterOptions,
+        filteredMembers: filteredMembers, memberSummary: memberSummary,
+        memberColumns: memberColumns, memberPagination: memberPagination,
+        memberLoading: memberLoading, currentGid: currentGid, loadMembers: loadMembers
+      };
     }
   };
 
-  $("btnRefresh").onclick = function () { fail(""); refresh(); };
-  $("btnAll").onclick = function () { window.PAGE.backfill(""); };
-  $("btnCancel").onclick = function () { bridge.apiPost("backfill/cancel", {}).catch(function () {}); };
-  $("btnClose").onclick = function () { $("drawer").hidden = true; };
-  $("filter").onchange = function () { memberFilter = this.value; page = 0; renderMembers(); };
-  $("pgPrev").onclick = function () { if (page > 0) { page--; renderMembers(); } };
-  $("pgNext").onclick = function () { page++; renderMembers(); };
+  // 暴露 bridge 给 setup 使用（等待就绪后挂到 window.__bridge）
+  var bridgeReady = new Promise(function (resolve, reject) {
+    var start = Date.now();
+    (function poll() {
+      var b = window.AstrBotPluginPage;
+      if (b && typeof b.apiGet === "function") return resolve(b);
+      if (Date.now() - start > 4000)
+        return reject(new Error("未检测到 AstrBot 插件 Page 桥接，请从 AstrBot 后台的插件拓展页打开本页面"));
+      setTimeout(poll, 120);
+    })();
+  });
 
-  waitBridge(4000).then(function (b) {
+  bridgeReady.then(function (b) {
     bridge = b;
-    try {
-      var ctx = b.getContext && b.getContext();
-      if (ctx && ctx.isDark) document.body.classList.add("dark");
-    } catch (e) { /* sandbox 下忽略 */ }
-    refresh().then(pollStatus);
+    var app = createApp(App);
+    app.use(naive);
+    app.mount("#app");
+    window.__panelFail = function (msg) { console.warn("[member_panel]", msg); };
   }).catch(function (e) {
-    document.body.innerHTML = '<div class="notice">' + esc(e.message) +
-      '<br><br>本页面用于查看「萌萌资料卡」记录的成员数据，请从 AstrBot 管理面板的插件拓展页打开。</div>';
+    document.getElementById("app").innerHTML =
+      '<div style="padding:24px;background:#fdf0e3;color:#d0722f;border-radius:12px;margin:20px;font-family:sans-serif">' +
+      e.message + '<br><br>本页面用于查看「萌萌资料卡」的成员数据，请从 AstrBot 管理面板的插件拓展页打开。</div>';
   });
 })();
 </script>

@@ -162,14 +162,19 @@ class MemberStore:
             self._conn.commit()
 
     def ensure_join_many(self, rows: list[tuple]) -> None:
-        """批量回填入群时间（rows: group_id, user_id, join_time 文本）；已有精确值不被覆盖。"""
+        """批量回填入群时间（rows: group_id, user_id, join_time 文本）。
+
+        只回填 join_time 为空的占位行（历史事件留下的）；已有精确值不被覆盖。
+        """
         if not rows:
             return
         with self._lock:
             self._conn.executemany(
                 """
-                INSERT OR IGNORE INTO member_times (group_id, user_id, join_time, leave_time)
+                INSERT INTO member_times (group_id, user_id, join_time, leave_time)
                 VALUES (?, ?, ?, '')
+                ON CONFLICT(group_id, user_id) DO UPDATE SET join_time = excluded.join_time
+                WHERE member_times.join_time = ''
                 """,
                 rows,
             )
