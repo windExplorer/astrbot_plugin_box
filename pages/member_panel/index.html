@@ -106,17 +106,17 @@
                     <div class="field-label">{{ f.label }}</div>
                     <n-switch v-if="f.type === 'switch'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"></n-switch>
-                    <n-input-number v-else-if="f.type === 'number'"
+                    <n-input-number v-if="f.type === 'number'"
                                     :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                                     :min="f.min" :max="f.max" style="width:220px"></n-input-number>
-                    <n-select v-else-if="f.type === 'tags'"
+                    <n-select v-if="f.type === 'tags'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                               filterable tag multiple :options="[]"
                               :placeholder="f.placeholder || '输入后回车添加'" />
-                    <n-select v-else-if="f.type === 'multiselect'"
+                    <n-select v-if="f.type === 'multiselect'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                               multiple :options="displayFieldOptions" />
-                    <n-input v-else-if="f.type === 'textarea'"
+                    <n-input v-if="f.type === 'textarea'"
                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                              type="textarea" :rows="3"></n-input>
                     <n-input v-else
