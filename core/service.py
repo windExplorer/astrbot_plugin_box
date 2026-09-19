@@ -10,7 +10,7 @@ from astrbot.api import logger
 
 from .config import PluginConfig
 from .draw import CardMaker
-from .profile import BoxUserProfile, join_days_suffix
+from .profile import BoxUserProfile, friendly_duration, join_days_suffix
 from .store import MemberStore
 
 library_display_options = [
@@ -214,7 +214,7 @@ class BoxService:
                 try:
                     join_dt = datetime.strptime(db_join, "%Y-%m-%d %H:%M:%S")
                     leave_dt = datetime.strptime(db_leave, "%Y-%m-%d %H:%M:%S")
-                    display.append(f"在群时长：{max((leave_dt - join_dt).days, 0)} 天")
+                    display.append(f"在群时长：{friendly_duration(leave_dt - join_dt)}")
                 except ValueError:
                     pass
             # 群等级/群头衔：接口有就用接口的，否则取最后已知缓存值
@@ -465,7 +465,9 @@ class BoxService:
         for idx, (_t, uid) in enumerate(joined, start=1):
             if uid == target_id:
                 return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
-        # 目标已不在群里（退群/被踢）：按库内记录的入群时间，对比现有成员估算其排位
+        # 目标已不在群里（退群/被踢）：排位与总数都把已知的离群成员算进去——
+        # 排位 = 早于其入群的现有成员数 + 早于其入群的已知离群者数 + 1；
+        # 总数 = 现有成员数 + 已知离群者数
         try:
             record = self.store.get(group_id, target_id)
         except Exception:
@@ -473,8 +475,19 @@ class BoxService:
         if record and record[0]:
             try:
                 join_dt = datetime.strptime(record[0], "%Y-%m-%d %H:%M:%S")
-                pos = 1 + sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
-                return f"第 {pos} 位 · 共 {len(joined)} 人", pos, len(joined)
+                departed = self.store.departed_joins_for_group(group_id)
+                before = sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
+                for uid, jt in departed.items():
+                    if uid == target_id or not jt:
+                        continue
+                    try:
+                        if datetime.strptime(jt, "%Y-%m-%d %H:%M:%S") < join_dt:
+                            before += 1
+                    except ValueError:
+                        continue
+                pos = 1 + before
+                total = len(joined) + len(departed)
+                return f"第 {pos} 位 · 共 {total} 人", pos, total
             except ValueError:
                 pass
         return "", 0, 0

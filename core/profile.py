@@ -18,6 +18,32 @@ def join_days_suffix(join_time: Any) -> str:
         return ""
 
 
+def friendly_duration(delta: Any) -> str:
+    """Friendly duration: start from the largest non-zero unit down to seconds.
+
+    Examples: 5分3秒 -> "5分钟3秒"; 2天0时0分3秒 -> "2天3秒"; 871天 -> "871天".
+    """
+    try:
+        total = int(delta.total_seconds())
+    except (TypeError, ValueError, AttributeError):
+        return ""
+    if total <= 0:
+        return "不到 1 秒"
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}天")
+    if hours:
+        parts.append(f"{hours}小时")
+    if minutes:
+        parts.append(f"{minutes}分钟")
+    if seconds:
+        parts.append(f"{seconds}秒")
+    return "".join(parts[:3]) or "不到 1 秒"
+
+
 @dataclass(slots=True)
 class BoxUserProfile:
     """QQ user profile data used by the box service."""

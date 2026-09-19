@@ -212,6 +212,15 @@ class MemberStore:
             ).fetchall()
         return {r[0]: r[1] for r in rows}
 
+    def departed_joins_for_group(self, group_id: str) -> dict[str, str]:
+        """已离群成员（有退群/被踢记录）的入群时间，用于估算离群者的历史排位。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT user_id, join_time FROM member_times WHERE group_id = ? AND leave_time != ''",
+                (group_id,),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
     def get_meta(self, key: str) -> str:
         with self._lock:
             row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
