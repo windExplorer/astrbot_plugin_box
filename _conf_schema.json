@@ -195,6 +195,58 @@
         },
         "default": 1
     },
+    "welcome_enabled": {
+        "description": "入群欢迎语",
+        "type": "bool",
+        "hint": "入群卡展示后，在同一消息里 @ 新成员并发送欢迎语文本（需开启自动展示入群卡）",
+        "default": true
+    },
+    "welcome_text": {
+        "description": "欢迎语模板",
+        "type": "string",
+        "hint": "支持 {name} 与 {count_text} 占位符；{count_text} 会替换为「你是本群第 N 位成员（共 M 人）」",
+        "default": "🎉 欢迎 {name} 加入本群！\n{count_text}"
+    },
+    "welcome_ai_enabled": {
+        "description": "AI 欢迎语",
+        "type": "bool",
+        "hint": "开启后在欢迎语后追加一句 LLM 生成的个性化欢迎语（消耗 token）",
+        "default": false
+    },
+    "welcome_ai_prompt": {
+        "description": "AI 欢迎语提示词",
+        "type": "string",
+        "hint": "{name} 会替换为新成员昵称",
+        "default": "请根据以下昵称，生成一句简短、温暖、有趣的入群欢迎语：{name}"
+    },
+    "welcome_ai_retry": {
+        "description": "AI 欢迎语重试次数",
+        "type": "int",
+        "slider": {
+            "min": 0,
+            "max": 5,
+            "step": 1
+        },
+        "default": 1
+    },
+    "welcome_private_rules": {
+        "description": "私聊发送群规",
+        "type": "bool",
+        "hint": "新成员入群展示卡片刻钟，私聊发送一段群规文本",
+        "default": false
+    },
+    "group_rules": {
+        "description": "群规文本",
+        "type": "string",
+        "hint": "开启私聊群规后发送的内容",
+        "default": "📋 请遵守群规，友善交流！"
+    },
+    "black_groups": {
+        "description": "群黑名单",
+        "type": "list",
+        "hint": "自动展示的排除名单；白名单为空时生效（白名单优先）",
+        "default": []
+    },
     "mystery_url": {
         "description": "拓展配置项",
         "hint": "无需填写，仅供开发人员使用",

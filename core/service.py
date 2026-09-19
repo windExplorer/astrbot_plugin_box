@@ -43,6 +43,10 @@ class BoxResult:
     card_type: str = ""  # "" 查询 / "join" 入群 / "leave" 退群 / "kick" 被踢
     from_cache: bool = False
 
+    display_name: str = ""  # 群昵称或昵称，欢迎语等场景使用
+    join_pos: int = 0
+    join_total: int = 0
+
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
         return cls(ok=False, error=msg, target_id=target_id, group_id=group_id)
@@ -241,10 +245,13 @@ class BoxService:
             display=display,
             level_text=level_text,
             card_type=card_type,
+            display_name=profile.card or profile.nickname or target_id,
         )
 
         if group_id:
-            result.join_rank = await self._get_join_rank(bot, group_id, target_id)
+            result.join_rank, result.join_pos, result.join_total = await self._get_join_rank(
+                bot, group_id, target_id
+            )
         result.analyses = await self._get_analyses(target_id, profile, display, card_type)
         return result
 
@@ -355,13 +362,16 @@ class BoxService:
             self._cache_store(group_id, target_id, result)
             return result
 
-    async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> str:
-        """Compute the member's join order within the group, e.g. "第 12 位 · 共 345 人"."""
+    async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> tuple[str, int, int]:
+        """Compute the member's join order within the group.
+
+        Returns (display_text, position, total); text is "" when unavailable.
+        """
         try:
             members = await bot.get_group_member_list(group_id=int(group_id))
         except Exception as e:
             logger.warning(f"get_group_member_list failed: {e}")
-            return ""
+            return "", 0, 0
 
         joined = []
         for m in members:
@@ -372,13 +382,13 @@ class BoxService:
             if join_time > 0:
                 joined.append((join_time, str(m.get("user_id"))))
         if not joined:
-            return ""
+            return "", 0, 0
 
         joined.sort()
         for idx, (_t, uid) in enumerate(joined, start=1):
             if uid == target_id:
-                return f"第 {idx} 位 · 共 {len(joined)} 人"
-        return ""
+                return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
+        return "", 0, 0
 
     async def _get_analyses(
         self, target_id: str, profile: BoxUserProfile, display: list[str], card_type: str = ""

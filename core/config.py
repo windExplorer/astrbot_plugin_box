@@ -114,6 +114,14 @@ class PluginConfig(ConfigNode):
     record_join_leave: bool
     cache_cooldown: int
     max_concurrent: int
+    welcome_enabled: bool
+    welcome_text: str
+    welcome_ai_enabled: bool
+    welcome_ai_prompt: str
+    welcome_ai_retry: int
+    welcome_private_rules: bool
+    group_rules: str
+    black_groups: list
     mystery_url: str
     mystery_cookies: str
 
