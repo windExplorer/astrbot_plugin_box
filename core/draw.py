@@ -50,7 +50,7 @@ ROW_GAP = 14
 LINE_GAP = 6
 FONT_SIZE = 32
 TITLE_SIZE = 54
-LEVEL_SIZE = 30
+LEVEL_SIZE = 26
 SUBTITLE_SIZE = 27
 SIGN_SIZE = 26
 ANALYSIS_SIZE = 28
@@ -511,12 +511,38 @@ class CardMaker:
             title = "资料卡"
         return title, qq, sig, body
 
+    def _level_metrics(self, level: str) -> dict:
+        """Split the level text into icons + number and compute badge metrics.
+
+        Icons live in a white pill (readable on the pink header); the number
+        sits as plain dark text beside the pill. `total` includes the gap to
+        the title, so the title layout can reserve exactly this much space.
+        """
+        level_font = self._font(LEVEL_SIZE)
+        icons = "".join(ch for ch in level if ch in ICON_PAINTERS)
+        rest = "".join(ch for ch in level if ch not in ICON_PAINTERS).strip()
+        icon_h = self._emoji_target(level_font)
+        pill_w = len(icons) * (icon_h + 3) + 24 if icons else 0  # 12px padding each side
+        pill_h = icon_h + 10
+        rest_w = self._measure(rest, level_font) if rest else 0.0
+        gap = 10 if icons and rest else 0
+        return {
+            "font": level_font,
+            "icons": icons,
+            "rest": rest,
+            "icon_h": icon_h,
+            "pill_w": pill_w,
+            "pill_h": pill_h,
+            "rest_w": rest_w,
+            "gap": gap,
+            "total": 18 + pill_w + gap + rest_w,
+        }
+
     def _fit_title(self, title: str, level: str) -> tuple[ImageFont.FreeTypeFont, str]:
-        """Pick the largest title font (then truncate) that leaves room for the level badges."""
+        """Pick the largest title font (then truncate) that leaves room for the level badge."""
         text_x = PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
-        level_w = self._measure(level, self._font(LEVEL_SIZE)) + 20 if level else 0.0
-        title_max = avail - level_w
+        title_max = avail - (self._level_metrics(level)["total"] if level else 0)
         size = TITLE_SIZE
         while size > 40:
             if self._measure(title, self._font(size)) <= title_max:
@@ -604,25 +630,31 @@ class CardMaker:
         text_x = ox + PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
 
-        # title line: nickname + level badges
+        # title line: nickname + level badge
         title_font, title = self._fit_title(title, level)
         title_h = sum(title_font.getmetrics())
-        level_font = self._font(LEVEL_SIZE)
         title_y = oy + HEADER_TOP_PAD
         self._draw_mixed(img, draw, (text_x, title_y), title, title_font, (*TITLE_COLOR, 255))
         if level:
-            level_lh = sum(level_font.getmetrics())
-            level_y = title_y + (title_h - level_lh) / 2 + 2
-            lx = text_x + self._measure(title, title_font) + 22
-            # frosted white pill behind the badge: gold icons on the pink header are hard to read
-            pill_h = level_lh + 12
-            pill_w = self._measure(level, level_font) + 26
-            draw.rounded_rectangle(
-                [lx, level_y - 6, lx + pill_w, level_y - 6 + pill_h],
-                pill_h / 2,
-                fill=(255, 255, 255, 216),
-            )
-            self._draw_mixed(img, draw, (lx + 13, level_y), level, level_font, (*TITLE_COLOR, 255))
+            m = self._level_metrics(level)
+            title_center = title_y + title_h / 2
+            lx = text_x + self._measure(title, title_font) + 18
+            if m["icons"]:
+                pill_y = title_center - m["pill_h"] / 2
+                draw.rounded_rectangle(
+                    [lx, pill_y, lx + m["pill_w"], pill_y + m["pill_h"]],
+                    m["pill_h"] / 2,
+                    fill=(255, 255, 255, 255),
+                )
+                ascent = m["font"].getmetrics()[0]
+                icons_y = title_center - ascent / 2 - m["font"].size * 0.06
+                self._draw_mixed(img, draw, (lx + 12, icons_y), m["icons"], m["font"], (*TITLE_COLOR, 255))
+            if m["rest"]:
+                rest_lh = sum(m["font"].getmetrics())
+                rest_x = lx + m["pill_w"] + m["gap"] if m["icons"] else lx
+                self._draw_mixed(
+                    img, draw, (rest_x, title_center - rest_lh / 2), m["rest"], m["font"], (*TITLE_COLOR, 255)
+                )
 
         # QQ line
         sub_y = title_y + title_h + 8
