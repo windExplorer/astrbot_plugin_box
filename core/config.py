@@ -100,6 +100,7 @@ class AIAnalysisConfig(ConfigNode):
     avatar_analysis: bool
     signature_analysis: bool
     overall_analysis: bool
+    event_analysis: bool
 
 
 class PluginConfig(ConfigNode):

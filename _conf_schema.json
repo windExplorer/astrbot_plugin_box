@@ -158,6 +158,12 @@
                 "type": "bool",
                 "hint": "让 LLM 整合全部资料和头像写一句锐评",
                 "default": false
+            },
+            "event_analysis": {
+                "description": "退群/被踢卡 AI 分析",
+                "type": "bool",
+                "hint": "开启后退群卡和被踢卡也按上面的开关调用 LLM；默认关闭，退群/被踢卡不调用（入群卡始终按上面的开关执行）",
+                "default": false
             }
         }
     },

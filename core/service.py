@@ -218,7 +218,7 @@ class BoxService:
 
         if group_id:
             result.join_rank = await self._get_join_rank(bot, group_id, target_id)
-        result.analyses = await self._get_analyses(target_id, profile, display)
+        result.analyses = await self._get_analyses(target_id, profile, display, card_type)
         return result
 
     async def render_box_image(self, result: BoxResult) -> bytes:
@@ -235,6 +235,7 @@ class BoxService:
             result.join_rank,
             result.analyses,
             datetime.now(),
+            result.card_type,
         )
         return result.image
 
@@ -353,10 +354,13 @@ class BoxService:
         return ""
 
     async def _get_analyses(
-        self, target_id: str, profile: BoxUserProfile, display: list[str]
+        self, target_id: str, profile: BoxUserProfile, display: list[str], card_type: str = ""
     ) -> dict[str, str]:
         """Run the enabled AI analyses (avatar / signature / overall) concurrently."""
         ai = self.cfg.ai_analysis
+        # 退群/被踢卡默认不调用 LLM，除非显式开启 event_analysis
+        if card_type in ("leave", "kick") and not ai.event_analysis:
+            return {}
         enabled = {
             "avatar": ai.avatar_analysis,
             "signature": ai.signature_analysis,
