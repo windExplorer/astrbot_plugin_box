@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.12.7
+
+现象：面板「插件配置」页显示的开关与实际配置不一致（实际已开启的项显示为关闭）。
+
+根因：`GET /config` 与前端读取形状不匹配。`h_config_get` 按 `_CONFIG_FIELDS` 的键原样输出，嵌套项的键是**扁平点号**（`"autobox.enter"`）；而前端 `cfgGet(path)` 是**按点号逐层下钻**的，于是 `configData["autobox"]["enter"]` 取不到、恒为 `null` → 显示为关闭。顶层键（`only_admin` 等不含点号）不受影响，所以只有「自动展示」3 项与「AI 分析开关」4 项显示错误。
+
+**后果比显示错误更重**：`saveSection` 用同一个 `cfgGet` 取值回传，这 7 项会以 `null` POST 给 `POST /config`，`_coerce` 再把 `null` 变成 `False` / `[]`——即在该分区点「保存」会把实际配置清空（群白名单被清成 `[]`、四个 AI 分析开关被关掉）。
+
+Bug Fixes：
+
+- `h_config_get` 改为把带点号的键还原成嵌套结构返回（`{"autobox": {"enter": ...}, "ai_analysis": {...}}`），与 `cfgGet` / `cfgSet` 的下钻契约一致。`POST /config` 一侧仍收扁平点号键（`_CONFIG_FIELDS` 白名单即如此），未改。
+
+验证（真实浏览器 + 桩 bridge，同一份前端只切换后端返回形状）：
+
+- 扁平形状（修复前）：自动展示入群/退群、头像分析、综合锐评全部显示 OFF（实际为 true），群白名单 `600123` 不显示；点「保存「自动展示」」实测发出 `{"autobox.enter": null, "autobox.exit": null, "autobox.white_groups": null}` —— 复现了配置被清空的链路。
+- 嵌套形状（修复后）：上述 7 项与白名单标签均正确回显；点「保存「自动展示」」「保存「AI 分析开关」」实测发出 `true / false / ["600123"]` 等真实值。
+
+> 升级后请到「自动展示」「AI 分析开关」两页**核对一遍开关**，之前在面板里点过保存的话可能被清掉过。
+
 ## v0.12.6
 
 Bug Fixes：

@@ -385,15 +385,17 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         raw = plugin.cfg._data
         autobox = raw.get("autobox") if isinstance(raw.get("autobox"), dict) else {}
         ai_sub = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
-        values = {}
+        # 前端 cfgGet 是按点号逐层下钻的，故嵌套项必须还回成 {"autobox": {...}}
+        # 而不是扁平的 "autobox.enter"；POST /config 一侧仍收扁平点号键（白名单如此）。
+        values: dict[str, Any] = {}
         for key, kind in _CONFIG_FIELDS.items():
             if "." in key:
                 head, leaf = key.split(".", 1)
                 node = autobox if head == "autobox" else ai_sub
                 current = node.get(leaf) if isinstance(node, dict) else None
+                values.setdefault(head, {})[leaf] = _coerce(current, kind)
             else:
-                current = raw.get(key)
-            values[key] = _coerce(current, kind)
+                values[key] = _coerce(raw.get(key), kind)
         return _ok({"values": values})
 
     async def h_config_set(*_args, **_kwargs) -> dict:
