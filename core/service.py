@@ -2,6 +2,7 @@ import asyncio
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 import aiohttp
 from aiocqhttp import CQHttp

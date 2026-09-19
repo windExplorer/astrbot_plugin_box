@@ -1,5 +1,13 @@
 # 更新日志
 
+## v0.10.2
+
+修复 v0.10.0 无法加载：`_resolve_llm` 的类型标注使用了 `Any` 但 `service.py` 未从 `typing` 导入（该文件无 `from __future__ import annotations`，标注在加载期求值即 NameError）。
+
+Bug Fixes：
+
+- `service.py` 补 `from typing import Any`；全模块审计其余文件的 typing 名称使用，无其他缺失。
+
 ## v0.10.1
 
 普通查询卡的「已入群 N 天」同样改为友好时长格式。
