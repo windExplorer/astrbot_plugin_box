@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any
 
@@ -150,6 +151,14 @@ class MemberBackfiller:
                 except Exception as e:
                     self.state["errors"] += 1
                     self.state["last_error"] = f"群 {gid} 入库失败: {e}"
+                # 记录该群成员列表的实际长度：群报告人数(member_count)经常滞后 1~2 人，
+                # 覆盖率统计以列表数为准，否则会出现"幽灵缺口"
+                try:
+                    listed = json.loads(self.store.get_meta("group_listed") or "{}")
+                    listed[gid] = len(members)
+                    self.store.set_meta("group_listed", json.dumps(listed, ensure_ascii=False))
+                except Exception:
+                    pass
                 self.state["total_members"] += len(members)
                 self.state["done_groups"] += 1
                 await asyncio.sleep(GROUP_SLEEP_SECONDS)
@@ -176,18 +185,25 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         try:
             info_counts = plugin.box.store.info_counts()
             join_counts = plugin.box.store.join_counts()
+            listed_map = json.loads(plugin.box.store.get_meta("group_listed") or "{}")
         except Exception as e:
             return _err(f"读取统计失败: {e}")
         out = []
         for g in groups:
             gid = str(g.get("group_id") or "")
+            member_count = int(g.get("member_count") or 0)
+            # 列表数 > 群报告数时以列表为准；从未回填过的群没有列表数，用群报告数
+            listed = listed_map.get(gid) or member_count
+            unrec = max(listed - info_counts.get(gid, 0), 0)
             out.append(
                 {
                     "group_id": gid,
                     "group_name": str(g.get("group_name") or ""),
-                    "member_count": int(g.get("member_count") or 0),
+                    "member_count": member_count,
+                    "listed": listed,
                     "info_recorded": info_counts.get(gid, 0),
                     "join_recorded": join_counts.get(gid, 0),
+                    "unrecorded": unrec,
                 }
             )
         return _ok({"groups": out, "backfill": backfiller.status()})

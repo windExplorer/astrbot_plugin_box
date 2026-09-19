@@ -384,7 +384,10 @@ class BoxService:
             if result.is_fail():
                 return result
             await self.render_box_image(result)
-            self._cache_store(group_id, target_id, result)
+            # 只有普通查询的结果进缓存：事件卡（入群/退群/被踢）是特定场景的
+            # 一次性卡片，写进缓存会让冷却期内的手动查询端出一张"新朋友"卡
+            if card_type == "":
+                self._cache_store(group_id, target_id, result)
             return result
 
     # ------------------------------------------------------------ 欢迎语

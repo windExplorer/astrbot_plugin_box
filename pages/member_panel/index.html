@@ -173,7 +173,7 @@
       });
 
       var totalMembers = computed(function () {
-        return groups.value.reduce(function (s, g) { return s + (g.member_count || 0); }, 0);
+        return groups.value.reduce(function (s, g) { return s + (g.listed || g.member_count || 0); }, 0);
       });
       var totalInfoRecorded = computed(function () {
         return groups.value.reduce(function (s, g) { return s + (g.info_recorded || 0); }, 0);
@@ -263,9 +263,13 @@
               ])
             ]);
           } },
-        { title: "群人数", key: "member_count", width: 90, render: function (g) { return String(g.member_count || 0); } },
+        { title: "群人数", key: "listed", width: 90, render: function (g) {
+            var base = g.listed || g.member_count || 0;
+            var note = g.member_count && g.member_count !== base ? ' <span class="muted">(报告 ' + g.member_count + ')</span>' : "";
+            return String(base) + note;
+          } },
         { title: "群内信息记录", key: "info_recorded", width: 170, render: function (g) {
-            var total = g.member_count || 0;
+            var total = g.listed || g.member_count || 0;
             var pct = total ? Math.round((g.info_recorded || 0) * 100 / total) : 100;
             return h("div", null, [
               h("div", { style: "margin-bottom:4px" }, g.info_recorded + " / " + total),
@@ -275,8 +279,8 @@
           } },
         { title: "入群时间记录", key: "join_recorded", width: 110, render: function (g) { return String(g.join_recorded || 0); } },
         { title: "状态", key: "state", width: 100, render: function (g) {
-            var total = g.member_count || 0;
-            var unrec = Math.max(total - (g.info_recorded || 0), 0);
+            if (!g.listed) return h(NS.NTag, { size: "small", bordered: false }, { default: function () { return "未回填"; } });
+            var unrec = g.unrecorded || 0;
             return h(NS.NTag, { size: "small", type: unrec ? "warning" : "success", bordered: false },
                      { default: function () { return unrec ? "缺 " + unrec : "已齐全"; } });
           } },
