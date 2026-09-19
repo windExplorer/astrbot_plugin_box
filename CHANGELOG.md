@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.12.6
+
+Bug Fixes：
+
+- 修复 v0.12.4 引入的**面板整页白屏**（表现为「WebUI 打开啥东西都没有」）。删「可用对话模型提供商」表格时只删掉了 `modelColumns` 的定义与模板用法，`setup()` 的 return 里仍留着 `modelColumns: modelColumns`，Vue 在 setup 阶段抛 `ReferenceError: modelColumns is not defined`，`app.mount` 中断，页面上只剩 `#app` 内的静态头部。已移除该残留引用。
+
+验证：以桩 `window.AstrBotPluginPage`（`apiGet`/`apiPost` 返回空数据）在真实浏览器中分别加载修复前后两份页面——修复前稳定复现上述 `ReferenceError ... at setup` 且四个页面全无内容；修复后「概览 / 群数据 / 插件配置 / 模型」四页均正常渲染，控制台零报错。
+
+> `index.html` 是无构建步骤的单文件模板，删变量时**必须**同时检查 `setup()` 的 return；模板与 return 的标识符任一侧悬空都会整页挂掉，改完必做浏览器冒烟。
+
 ## v0.12.5
 
 配置弹窗的模型选择改用 AstrBot 原生提供商选择器。
