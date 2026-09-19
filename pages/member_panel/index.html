@@ -265,8 +265,13 @@
           } },
         { title: "群人数", key: "listed", width: 90, render: function (g) {
             var base = g.listed || g.member_count || 0;
-            var note = g.member_count && g.member_count !== base ? ' <span class="muted">(报告 ' + g.member_count + ')</span>' : "";
-            return String(base) + note;
+            if (g.member_count && g.member_count !== base) {
+              return h("div", null, [
+                String(base) + " ",
+                h("span", { class: "muted" }, "(报告 " + g.member_count + ")")
+              ]);
+            }
+            return String(base);
           } },
         { title: "群内信息记录", key: "info_recorded", width: 170, render: function (g) {
             var total = g.listed || g.member_count || 0;
