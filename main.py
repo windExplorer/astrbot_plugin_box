@@ -58,7 +58,10 @@ class BoxPlugin(Star):
         self._backfill_task: asyncio.Task | None = None
 
     async def initialize(self) -> None:
-        """AstrBot 插件生命周期钩子：注册面板路由 + 启动初始化回填。"""
+        """AstrBot 插件生命周期钩子：注册面板路由 + 启动初始化回填。
+
+        生命周期钩子抛异常会导致整个插件加载失败，这里全程兜底。
+        """
         try:
             from .core.webui_api import MemberBackfiller, register_apis
         except ImportError:  # 平铺调试
@@ -68,10 +71,13 @@ class BoxPlugin(Star):
         try:
             register_apis(self, self._backfiller)
         except Exception as e:
-            logger.warning(f"[资料卡] 面板路由注册失败: {e}")
+            logger.warning(f"[资料卡] 面板路由注册失败（成员数据面板不可用）: {e}")
 
-        if self.cfg.init_backfill:
-            self._backfill_task = asyncio.create_task(self._safe_init_backfill())
+        try:
+            if self.cfg.init_backfill:
+                self._backfill_task = asyncio.create_task(self._safe_init_backfill())
+        except Exception as e:
+            logger.warning(f"[资料卡] 初始化回填任务启动失败: {e}")
 
     def _get_bot(self):
         """鸭子类型找 OneBot 适配器的 bot 客户端（可能尚未连接，返回 None）。"""

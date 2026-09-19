@@ -113,6 +113,7 @@ class PluginConfig(ConfigNode):
     desensitize: bool
     ai_analysis: AIAnalysisConfig
     record_join_leave: bool
+    init_backfill: bool
     cache_cooldown: int
     max_concurrent: int
     welcome_enabled: bool

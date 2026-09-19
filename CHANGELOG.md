@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.8.1
+
+修复 v0.8.0 无法加载：`init_backfill` 漏声明配置字段，`initialize()` 访问时抛 `AttributeError`，生命周期钩子的异常导致整个插件加载失败（原因：init_backfill）。
+
+Bug Fixes：
+
+- `PluginConfig` 补声明 `init_backfill` 字段（与 v0.7.3 的 `welcome_images` 同类疏漏）。
+- 已系统性核对：`_conf_schema.json` 全部 22 个顶层键与嵌套子键均已在配置类中声明。
+- `initialize()` 生命周期钩子全程 try/except 兜底——钩子内任何异常只降级对应功能（面板/回填不可用并记日志），不再阻断插件加载。
+
 ## v0.8.0
 
 新增成员数据面板（WebUI）与启动自动回填。
