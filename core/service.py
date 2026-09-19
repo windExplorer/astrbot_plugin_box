@@ -193,43 +193,57 @@ class BoxService:
             except Exception as e:
                 logger.warning(f"[资料卡] 读取本地时间库失败: {e}")
 
-        if db_join and (show_join or force_times):
-            # 入群卡上「已入群 0 天」没有意义，只有查询/退群卡带天数后缀
-            days_txt = "" if card_type == "join" else join_days_suffix(member_info.get("join_time"))
-            replaced = False
-            for i, line in enumerate(display):
-                if line.startswith("加群时间："):
-                    display[i] = f"加群时间：{db_join}{days_txt}"
-                    replaced = True
-                    break
-            if not replaced and not member_info:
+        if force_times:
+            # 事件卡：适配器对已离群成员可能返回残留/半空数据（不报错），
+            # 先剔除 API 侧同类行，再按固定顺序重组（DB 精确值优先，接口数据兜底）
+            labels = ("加群时间：", "退群时间：", "被踢时间：", "在群时长：", "群等级：", "群头衔：")
+            display = [line for line in display if not line.startswith(labels)]
+            if db_join:
                 display.append(f"加群时间：{db_join}")
-        if db_leave and not member_info:
-            leave_label = "被踢时间" if card_type == "kick" else "退群时间"
-            display.append(f"{leave_label}：{db_leave}")
-        if force_times and db_join and db_leave:
+            elif member_info.get("join_time"):
+                try:
+                    display.append(
+                        "加群时间："
+                        + datetime.fromtimestamp(int(member_info["join_time"])).strftime("%Y-%m-%d %H:%M:%S")
+                    )
+                except (TypeError, ValueError, OSError, OverflowError):
+                    pass
+            if db_leave:
+                display.append(f"{'被踢时间' if card_type == 'kick' else '退群时间'}：{db_leave}")
+            if db_join and db_leave:
+                try:
+                    join_dt = datetime.strptime(db_join, "%Y-%m-%d %H:%M:%S")
+                    leave_dt = datetime.strptime(db_leave, "%Y-%m-%d %H:%M:%S")
+                    display.append(f"在群时长：{max((leave_dt - join_dt).days, 0)} 天")
+                except ValueError:
+                    pass
+            # 群等级/群头衔：接口有就用接口的，否则取最后已知缓存值
+            known = {}
             try:
-                join_dt = datetime.strptime(db_join, "%Y-%m-%d %H:%M:%S")
-                leave_dt = datetime.strptime(db_leave, "%Y-%m-%d %H:%M:%S")
-                display.append(f"在群时长：{max((leave_dt - join_dt).days, 0)} 天")
-            except ValueError:
-                pass
-        if force_times and not member_info and group_id:
-            # 群等级/群头衔取最后已知值（人已不在群里，接口查不到）
-            try:
-                known = self.store.get_member_info(group_id, target_id)
+                known = self.store.get_member_info(group_id, target_id) or {}
             except Exception as e:
                 logger.warning(f"[资料卡] 读取成员信息缓存失败: {e}")
-                known = None
-            if known:
-                lv = known.get("level")
-                try:
-                    if lv and int(lv) > 0:
-                        display.append(f"群等级：{int(lv)}级")
-                except (TypeError, ValueError):
-                    pass
-                if known.get("title"):
-                    display.append(f"群头衔：{known['title']}")
+            level_value = member_info.get("level") or known.get("level")
+            try:
+                if level_value and int(level_value) > 0:
+                    display.append(f"群等级：{int(level_value)}级")
+            except (TypeError, ValueError):
+                pass
+            title_value = member_info.get("title") or known.get("title")
+            if title_value:
+                display.append(f"群头衔：{title_value}")
+        else:
+            if db_join and show_join:
+                replaced = False
+                for i, line in enumerate(display):
+                    if line.startswith("加群时间："):
+                        display[i] = f"加群时间：{db_join}{join_days_suffix(member_info.get('join_time'))}"
+                        replaced = True
+                        break
+                if not replaced and not member_info:
+                    display.append(f"加群时间：{db_join}")
+            if db_leave and not member_info:
+                display.append(f"退群时间：{db_leave}")
         if card_type == "kick" and operator_id:
             operator_name = ""
             try:
@@ -448,6 +462,18 @@ class BoxService:
         for idx, (_t, uid) in enumerate(joined, start=1):
             if uid == target_id:
                 return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
+        # 目标已不在群里（退群/被踢）：按库内记录的入群时间，对比现有成员估算其排位
+        try:
+            record = self.store.get(group_id, target_id)
+        except Exception:
+            record = None
+        if record and record[0]:
+            try:
+                join_dt = datetime.strptime(record[0], "%Y-%m-%d %H:%M:%S")
+                pos = 1 + sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
+                return f"第 {pos} 位 · 共 {len(joined)} 人", pos, len(joined)
+            except ValueError:
+                pass
         return "", 0, 0
 
     async def _get_analyses(
