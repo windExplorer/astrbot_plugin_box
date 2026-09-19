@@ -17,7 +17,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 from .profile import BoxUserProfile
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resource"
-FONT_PATH = RESOURCE_DIR / "ResourceHanRoundedCN-Medium.ttf"
+FONT_PATH = RESOURCE_DIR / "ResourceHanRoundedCN-Medium.woff2"
 EMOJI_PATH = RESOURCE_DIR / "NotoColorEmoji.ttf"
 
 # ---------------------------------------------------------------- palette
