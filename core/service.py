@@ -9,7 +9,7 @@ from astrbot.api import logger
 
 from .config import PluginConfig
 from .draw import CardMaker
-from .profile import BoxUserProfile
+from .profile import BoxUserProfile, join_days_suffix
 from .store import MemberStore
 
 library_display_options = [
@@ -107,10 +107,24 @@ class BoxService:
             except Exception:
                 pass
 
+        # 名片获赞数：NapCat 扩展接口，不可用时静默跳过
+        like_count = None
+        try:
+            resp = await bot.call_api("get_profile_like", user_id=int(target_id))
+            if isinstance(resp, dict):
+                for key in ("total_vote_count", "like_count", "count", "total"):
+                    value = resp.get(key)
+                    if isinstance(value, (int, str)) and str(value).isdigit() and int(value) > 0:
+                        like_count = int(value)
+                        break
+        except Exception:
+            like_count = None
+
         profile = BoxUserProfile.from_sources(
             dict(stranger_info),
             dict(member_info),
             library_info,
+            like_count=like_count,
         )
         display = profile.to_display_lines(
             display_options,
@@ -152,7 +166,7 @@ class BoxService:
                     replaced = False
                     for i, line in enumerate(display):
                         if line.startswith("加群时间："):
-                            display[i] = f"加群时间：{db_join}"
+                            display[i] = f"加群时间：{db_join}{join_days_suffix(member_info.get('join_time'))}"
                             replaced = True
                             break
                     if not replaced and not member_info:

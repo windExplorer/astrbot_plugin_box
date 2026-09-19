@@ -9,6 +9,15 @@ from typing import Any, ClassVar
 from zhdate import ZhDate
 
 
+def join_days_suffix(join_time: Any) -> str:
+    """Human-readable "已入群 N 天" suffix; empty on bad/missing input."""
+    try:
+        days = max((datetime.now() - datetime.fromtimestamp(int(join_time))).days, 0)
+        return f"（已入群 {days} 天）"
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
 @dataclass(slots=True)
 class BoxUserProfile:
     """QQ user profile data used by the box service."""
@@ -21,6 +30,7 @@ class BoxUserProfile:
         "remark": "备注",
         "card": "群昵称",
         "title": "群头衔",
+        "role": "群身份",
         "sex": "性别",
         "birthday": "生日",
         "constellation": "星座",
@@ -40,8 +50,10 @@ class BoxUserProfile:
         "is_vip": "QQVIP",
         "is_years_vip": "年VIP",
         "vip_level": "VIP等级",
+        "like_count": "获赞",
         "level": "群等级",
         "join_time": "加群时间",
+        "last_sent": "最后发言",
         "qqLevel": "QQ等级",
         "reg_time": "注册时间",
         "login_days": "登录天数",
@@ -67,6 +79,7 @@ class BoxUserProfile:
     remark: str = ""
     card: str = ""
     title: str = ""
+    role: str = ""
     sex: str = ""
     birthday_year: Any = None
     birthday_month: Any = None
@@ -88,8 +101,10 @@ class BoxUserProfile:
     is_vip: bool = False
     is_years_vip: bool = False
     vip_level: Any = None
+    like_count: Any = None
     group_level: Any = None
     join_time: Any = None
+    last_sent: Any = None
     qq_level: Any = None
     reg_time: Any = None
     login_days: Any = None
@@ -115,6 +130,7 @@ class BoxUserProfile:
         stranger_info: dict[str, Any],
         member_info: dict[str, Any] | None = None,
         library_info: dict[str, Any] | None = None,
+        like_count: Any = None,
     ) -> BoxUserProfile:
         """Build a profile from source data.
 
@@ -122,6 +138,7 @@ class BoxUserProfile:
             stranger: Data returned by get_stranger_info.
             member: Data returned by get_group_member_info.
             library: Data returned by the library API.
+            like_count: Profile like count from the adapter's extended API.
 
         Returns:
             User profile model.
@@ -138,6 +155,7 @@ class BoxUserProfile:
             remark=str(stranger.get("remark") or ""),
             card=str(member.get("card") or ""),
             title=str(member.get("title") or ""),
+            role=str(member.get("role") or ""),
             sex=str(stranger.get("sex") or ""),
             birthday_year=stranger.get("birthday_year"),
             birthday_month=stranger.get("birthday_month"),
@@ -159,8 +177,10 @@ class BoxUserProfile:
             is_vip=bool(stranger.get("is_vip")),
             is_years_vip=bool(stranger.get("is_years_vip")),
             vip_level=stranger.get("vip_level"),
+            like_count=like_count,
             group_level=member.get("level"),
             join_time=member.get("join_time"),
+            last_sent=member.get("last_sent_time"),
             qq_level=cls._pick_qq_level(stranger),
             reg_time=stranger.get("reg_time"),
             login_days=stranger.get("login_days"),
@@ -276,6 +296,9 @@ class BoxUserProfile:
                 return [f"{label}：{self.card}"] if self.card else []
             case "title":
                 return [f"{label}：{self.title}"] if self.title else []
+            case "role":
+                text = {"owner": "群主", "admin": "管理员", "member": "成员"}.get(self.role)
+                return [f"{label}：{text}"] if text else []
             case "sex":
                 text = {"male": "男", "female": "女"}.get(self.sex)
                 return [f"{label}：{text}"] if text else []
@@ -339,6 +362,8 @@ class BoxUserProfile:
                 if self.vip_level and int(self.vip_level) != 0:
                     return [f"{label}：{self.vip_level}"]
                 return []
+            case "like_count":
+                return [f"{label}：{self.like_count}"] if self.like_count else []
             case "level":
                 # 部分适配器把群等级返回成字符串 "0"（truthy），需转 int 后按 0 过滤
                 try:
@@ -348,10 +373,19 @@ class BoxUserProfile:
                 return [f"{label}：{level_value}级"] if level_value > 0 else []
             case "join_time":
                 if self.join_time:
-                    return [
-                        f"{label}："
-                        f"{datetime.fromtimestamp(int(self.join_time)).strftime('%Y-%m-%d')}"
-                    ]
+                    try:
+                        join_date = datetime.fromtimestamp(int(self.join_time)).strftime("%Y-%m-%d")
+                        return [f"{label}：{join_date}{join_days_suffix(self.join_time)}"]
+                    except (TypeError, ValueError, OSError, OverflowError):
+                        return []
+                return []
+            case "last_sent":
+                if self.last_sent:
+                    try:
+                        sent_text = datetime.fromtimestamp(int(self.last_sent)).strftime("%Y-%m-%d %H:%M")
+                        return [f"{label}：{sent_text}"]
+                    except (TypeError, ValueError, OSError, OverflowError):
+                        return []
                 return []
             case "qqLevel":
                 if self.hide_qq_level:
