@@ -22,8 +22,34 @@ from .core.service import BoxResult, BoxService
 class BoxPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.cfg = PluginConfig(config, context)
-        self.box = BoxService(self.cfg)
+        # AstrBot 热更新只重载 main.py，core/ 子模块会残留在 sys.modules 里继续跑旧代码，
+        # 导致「更新后卡片样式/行为不变」。这里按依赖顺序（被依赖者在前）强制重载一次。
+        try:
+            import importlib
+
+            for _dep_name in (
+                "profile",
+                "field_mapping",
+                "library",
+                "utils",
+                "draw",
+                "config",
+                "service",
+            ):
+                try:
+                    _mod = importlib.import_module(f"{__package__}.core.{_dep_name}")
+                    importlib.reload(_mod)
+                except Exception as _dep_err:
+                    logger.warning(f"[init] core.{_dep_name} 强制重载失败（沿用已加载模块）: {_dep_err}")
+        except Exception as _reload_err:
+            logger.warning(f"[init] 依赖模块强制重载失败（沿用已加载模块）: {_reload_err}")
+
+        # reload 之后重新绑定类：顶部 import 拿到的还是旧模块里的旧类对象
+        from .core.config import PluginConfig as _PluginConfig
+        from .core.service import BoxService as _BoxService
+
+        self.cfg = _PluginConfig(config, context)
+        self.box = _BoxService(self.cfg)
         self._recall_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
 
     async def terminate(self):

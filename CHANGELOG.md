@@ -1,5 +1,18 @@
 # 更新日志
 
+## v0.2.1
+
+修复热更新后新代码不生效的问题；AI 分析拆分为三个独立开关。
+
+Bug Fixes：
+
+- `main.py` 新增依赖模块强制重载列表（`__init__` 里按依赖顺序 `importlib.reload` core/ 全部子模块，重载后重新绑定 `PluginConfig` / `BoxService` 类）：AstrBot 热更新只重载 main.py，`core/draw.py` 等子模块残留在 `sys.modules` 里继续跑旧代码，导致「更新后卡片样式/行为不变」——v0.1.1 / v0.2.0 的新排版与等级徽章在热更新的实例上不可见即此根因。从旧版本升级后建议完整重启一次 AstrBot，清掉已被污染的模块缓存。
+- 等级徽章改为结构化传递：`BoxResult.level_text` 由 service 直接从 profile 数据生成（含「等级隐藏」），并从字段行中移除「QQ等级」行，不再依赖渲染层的行解析。只要接口返回了 `qqLevel` 数据就一定显示在昵称旁；若开启后仍不显示，说明 NapCat 的 `get_stranger_info` 未返回 `qqLevel` 字段（数据缺失，非渲染问题）。
+
+增强点：
+
+- AI 分析拆分为三个独立开关（`ai_analysis.avatar_analysis / signature_analysis / overall_analysis`，替代 v0.2.0 的单一 `llm_analysis`）：头像印象 / 签名解读 / 综合锐评三项并发调用、卡片上分区展示；签名解读在对方没有签名时自动跳过；未配置 LLM Provider 或单项调用失败不影响其他项与正常出卡。
+
 ## v0.2.0
 
 卡片二次重设计 + 三个新功能（AI 锐评 / 入群排位 / 获取时间）。

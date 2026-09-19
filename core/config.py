@@ -93,6 +93,12 @@ class AutoBoxConfig(ConfigNode):
     exit: bool
 
 
+class AIAnalysisConfig(ConfigNode):
+    avatar_analysis: bool
+    signature_analysis: bool
+    overall_analysis: bool
+
+
 class PluginConfig(ConfigNode):
     only_admin: bool
     protect_ids: list[str]
@@ -100,7 +106,7 @@ class PluginConfig(ConfigNode):
     display_options: list[str]
     recall_time: int
     desensitize: bool
-    llm_analysis: bool
+    ai_analysis: AIAnalysisConfig
     mystery_url: str
     mystery_cookies: str
 

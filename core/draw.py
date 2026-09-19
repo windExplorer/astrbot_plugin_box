@@ -368,8 +368,9 @@ class CardMaker:
         self,
         avatar: bytes,
         reply: list[str],
+        level: str = "",
         join_rank: str = "",
-        analysis: str = "",
+        analyses: dict[str, str] | None = None,
         fetched_at: datetime | None = None,
     ) -> bytes:
         """Create a profile card PNG.
@@ -377,17 +378,20 @@ class CardMaker:
         Args:
             avatar: Avatar image bytes.
             reply: Display lines to render.
+            level: QQ level badge text, e.g. "👑🌞(57)" or "等级隐藏".
             join_rank: Optional join-order text, e.g. "第 12 位 · 共 345 人".
-            analysis: Optional LLM comment shown in a dedicated block.
+            analyses: Optional AI comments keyed "avatar" / "signature" / "overall".
             fetched_at: When the profile data was fetched (shown in the footer).
 
         Returns:
             Rendered PNG bytes.
         """
         rows = self._parse_rows(reply)
-        title, qq, level, sig, body = self._split_header(rows)
+        title, qq, sig, body = self._split_header(rows)
         if join_rank:
             body.insert(0, ["入群排位", [join_rank]])
+
+        blocks = self._analysis_blocks(analyses)
 
         body_h = BODY_TOP_PAD + BODY_BOTTOM_PAD
         label_w = self._label_width(body)
@@ -395,7 +399,9 @@ class CardMaker:
             body_h += sum(self._row_height(label, values, label_w) for label, values in body)
             body_h += ROW_GAP * (len(body) - 1)
 
-        analysis_h = self._analysis_height(analysis) if analysis else 0
+        analysis_h = sum(self._analysis_block_height(text) for _label, text in blocks)
+        if len(blocks) > 1:
+            analysis_h += ROW_GAP * (len(blocks) - 1)
 
         header_h = self._header_height(title, level, sig)
         card_h = header_h + analysis_h + body_h + FOOTER_H
@@ -428,8 +434,8 @@ class CardMaker:
         self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h)
 
         y = oy + header_h + BODY_TOP_PAD
-        if analysis:
-            y = self._paint_analysis(img, draw, ox, y, analysis) + ROW_GAP
+        for block_label, block_text in blocks:
+            y = self._paint_analysis(img, draw, ox, y, block_label, block_text) + ROW_GAP
 
         row_x = ox + PAD
         row_w = CARD_W - PAD * 2
@@ -474,16 +480,14 @@ class CardMaker:
         widths = [self._measure(label, self.font) for label, _ in rows if label]
         return max(widths) + 22 if widths else 0.0
 
-    def _split_header(self, rows: list[list]) -> tuple[str, str, str, str, list[list]]:
-        """Pull nickname/QQ/level/signature out of the rows for the header.
+    def _split_header(self, rows: list[list]) -> tuple[str, str, str, list[list]]:
+        """Pull nickname/QQ/signature out of the rows for the header.
 
-        The QQ level only moves to the header when it carries level icons;
-        otherwise (e.g. "隐藏") it stays a normal row. The signature keeps
-        its wrapped lines joined back into one string.
+        The QQ level badge is passed in structurally (not via display lines).
+        The signature keeps its wrapped lines joined back into one string.
         """
         title = ""
         qq = ""
-        level = ""
         sig = ""
         body: list[list] = []
         for label, values in rows:
@@ -497,16 +501,13 @@ class CardMaker:
             if not title and label in ("群昵称", "备注"):
                 title = first
                 continue
-            if not level and label == "QQ等级" and any(ch in ICON_PAINTERS for ch in first):
-                level = first
-                continue
             if not sig and label == "签名":
                 sig = "".join(values)
                 continue
             body.append([label, values])
         if not title:
             title = "资料卡"
-        return title, qq, level, sig, body
+        return title, qq, sig, body
 
     def _fit_title(self, title: str, level: str) -> tuple[ImageFont.FreeTypeFont, str]:
         """Pick the largest title font (then truncate) that leaves room for the level badges."""
@@ -643,7 +644,22 @@ class CardMaker:
         _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
         _sparkle(sdraw, ox + CARD_W - 148, oy + 100, 12, (255, 243, 176, 210))
 
-    def _analysis_height(self, analysis: str) -> int:
+    _ANALYSIS_LABELS = (
+        ("avatar", "头像印象 · AI"),
+        ("signature", "签名解读 · AI"),
+        ("overall", "综合锐评 · AI"),
+    )
+
+    def _analysis_blocks(self, analyses: dict[str, str] | None) -> list[tuple[str, str]]:
+        analyses = analyses or {}
+        blocks: list[tuple[str, str]] = []
+        for key, label in self._ANALYSIS_LABELS:
+            text = (analyses.get(key) or "").strip()
+            if text:
+                blocks.append((label, text))
+        return blocks
+
+    def _analysis_block_height(self, analysis: str) -> int:
         block_w = CARD_W - PAD * 2
         text_w_limit = block_w - ROW_PAD_X * 2
         label_font = self._font(FOOTER_SIZE)
@@ -652,8 +668,16 @@ class CardMaker:
         n = len(self._wrap(analysis, font, text_w_limit))
         return 2 * ROW_PAD_V + 12 + label_h + n * (sum(font.getmetrics()) + LINE_GAP)
 
-    def _paint_analysis(self, img: Image.Image, draw: ImageDraw.ImageDraw, ox: int, y: int, analysis: str) -> int:
-        """Draw the LLM comment block; returns the block's bottom y."""
+    def _paint_analysis(
+        self,
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        ox: int,
+        y: int,
+        label: str,
+        analysis: str,
+    ) -> int:
+        """Draw one AI comment block; returns the block's bottom y."""
         block_w = CARD_W - PAD * 2
         text_w_limit = block_w - ROW_PAD_X * 2
         label_font = self._font(FOOTER_SIZE)
@@ -666,7 +690,7 @@ class CardMaker:
         ty = y + ROW_PAD_V + 12
         _heart(draw, ox + PAD + ROW_PAD_X + 7, ty + label_h / 2, 9, (255, 111, 165, 230))
         draw.text(
-            (ox + PAD + ROW_PAD_X + 24, ty), "萌萌锐评 · AI", font=label_font, fill=(*ANALYSIS_LABEL, 255)
+            (ox + PAD + ROW_PAD_X + 24, ty), label, font=label_font, fill=(*ANALYSIS_LABEL, 255)
         )
         ty += label_h + 6
         for part in self._wrap(analysis, font, text_w_limit):

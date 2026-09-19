@@ -36,8 +36,9 @@ class BoxResult:
     display: list[str] = field(default_factory=list)
     image: bytes | None = None
 
+    level_text: str = ""
     join_rank: str = ""
-    analysis: str = ""
+    analyses: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -114,16 +115,29 @@ class BoxService:
             desensitize=self.cfg.desensitize,
         )
 
+        # QQ等级提升为卡头徽章（结构化传递，不再走字段行解析）
+        enabled = set(display_options)
+        level_text = ""
+        if "qqLevel" in enabled or "QQ等级" in enabled:
+            if profile.hide_qq_level:
+                level_text = "等级隐藏"
+            elif profile.qq_level:
+                try:
+                    level_text = profile._format_qq_level(int(profile.qq_level))
+                except (TypeError, ValueError):
+                    level_text = ""
+        display = [line for line in display if not line.startswith("QQ等级：")]
+
         result = BoxResult(
             target_id=target_id,
             group_id=group_id,
             display=display,
+            level_text=level_text,
         )
 
         if group_id:
             result.join_rank = await self._get_join_rank(bot, group_id, target_id)
-        if self.cfg.llm_analysis:
-            result.analysis = await self._get_analysis(target_id, profile.long_nick)
+        result.analyses = await self._get_analyses(target_id, profile, display)
         return result
 
     async def render_box_image(self, result: BoxResult) -> bytes:
@@ -136,8 +150,9 @@ class BoxService:
             self.renderer.create,
             avatar,
             result.display,
+            result.level_text,
             result.join_rank,
-            result.analysis,
+            result.analyses,
             datetime.now(),
         )
         return result.image
@@ -167,26 +182,61 @@ class BoxService:
                 return f"第 {idx} 位 · 共 {len(joined)} 人"
         return ""
 
-    async def _get_analysis(self, target_id: str, signature: str) -> str:
-        """Ask the current LLM provider for a short comment on the avatar and signature."""
+    async def _get_analyses(
+        self, target_id: str, profile: BoxUserProfile, display: list[str]
+    ) -> dict[str, str]:
+        """Run the enabled AI analyses (avatar / signature / overall) concurrently."""
+        ai = self.cfg.ai_analysis
+        enabled = {
+            "avatar": ai.avatar_analysis,
+            "signature": ai.signature_analysis,
+            "overall": ai.overall_analysis,
+        }
+        if not any(enabled.values()):
+            return {}
         provider = self.cfg.context.get_using_provider()
         if not provider:
-            return ""
+            return {}
 
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={target_id}&spec=640"
-        prompt = (
-            "这是一位QQ用户的头像图片"
-            + (f"，个性签名是：「{signature}」" if signature else "")
-            + "。请根据头像画面和签名内容，用轻松幽默的语气写一句话点评这位用户，不超过45个字。"
-            "直接输出点评内容，不要任何前缀、引号或解释。"
-        )
-        try:
-            response = await provider.text_chat(prompt=prompt, image_urls=[avatar_url])
-            text = (response.completion_text or "").strip()
-            return text[:80]
-        except Exception as e:
-            logger.warning(f"llm analysis failed: {e}")
-            return ""
+        signature = (profile.long_nick or "").strip()
+        profile_text = "\n".join(display)
+
+        prompts: dict[str, tuple[str, bool]] = {}
+        if enabled["avatar"]:
+            prompts["avatar"] = (
+                "这是一位QQ用户的头像图片。请根据头像画面，用轻松幽默的语气写一句话点评这位用户，"
+                "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。",
+                True,
+            )
+        if enabled["signature"] and signature:
+            prompts["signature"] = (
+                f"一位QQ用户的个性签名是：「{signature}」。请据此用轻松幽默的语气写一句话点评这位用户，"
+                "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。",
+                False,
+            )
+        if enabled["overall"]:
+            prompts["overall"] = (
+                "这是一位QQ用户的头像图片和公开资料：\n"
+                f"{profile_text}\n"
+                "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"
+                "直接输出锐评内容，不要任何前缀、引号或解释。",
+                True,
+            )
+
+        async def _run(key: str, prompt: str, with_image: bool) -> tuple[str, str]:
+            try:
+                response = await provider.text_chat(
+                    prompt=prompt,
+                    image_urls=[avatar_url] if with_image else None,
+                )
+                return key, (response.completion_text or "").strip()[:80]
+            except Exception as e:
+                logger.warning(f"llm analysis [{key}] failed: {e}")
+                return key, ""
+
+        pairs = await asyncio.gather(*(_run(k, p, img) for k, (p, img) in prompts.items()))
+        return {key: text for key, text in pairs if text}
 
     async def _get_avatar(self, user_id: str) -> bytes | None:
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"

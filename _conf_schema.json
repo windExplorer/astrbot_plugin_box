@@ -129,11 +129,30 @@
         "hint": "对敏感信息进行脱敏处理，一般用不到，正常使用时没有敏感信息",
         "default": true
     },
-    "llm_analysis": {
-        "description": "AI 锐评",
-        "type": "bool",
-        "hint": "开启后用当前 LLM 提供商分析头像和个性签名，并在卡片上展示点评（消耗 token；自动展示新群友时同样会触发）",
-        "default": false
+    "ai_analysis": {
+        "description": "AI 分析（消耗 token，需已配置 LLM）",
+        "type": "object",
+        "hint": "开启后卡片会展示对应的分析点评，三项相互独立",
+        "items": {
+            "avatar_analysis": {
+                "description": "头像分析",
+                "type": "bool",
+                "hint": "让 LLM 看头像并写一句点评",
+                "default": false
+            },
+            "signature_analysis": {
+                "description": "签名解读",
+                "type": "bool",
+                "hint": "让 LLM 解读个性签名（对方没写签名时不展示）",
+                "default": false
+            },
+            "overall_analysis": {
+                "description": "综合锐评",
+                "type": "bool",
+                "hint": "让 LLM 整合全部资料和头像写一句锐评",
+                "default": false
+            }
+        }
     },
     "mystery_url": {
         "description": "拓展配置项",
