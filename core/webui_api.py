@@ -1,0 +1,266 @@
+"""成员数据面板的 Web API 与回填任务。
+
+路由前缀 ``/astrbot_plugin_box``（AstrBot 约定：带插件名），前端通过
+``window.AstrBotPluginPage.apiGet/apiPost`` 调用，Dashboard 转发。
+
+返回信封遵循 AstrBot 桥接约定：
+  - 成功 → ``{"status": "ok", "data": ...}``
+  - 失败 → ``{"status": "error", "message": "..."}``
+
+成员数据回填（MemberBackfiller）：拉取机器人所在群的成员列表，
+把群昵称/头衔/身份/等级写入 member_info，把 join_time 回填进 member_times，
+使退群/被踢卡的信息行不依赖「该成员曾被查询过」。
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from typing import Any
+
+from astrbot.api import logger
+
+try:  # quart 是 AstrBot 的运行期依赖
+    from quart import request
+except Exception:  # pragma: no cover
+    request = None  # type: ignore
+
+ROUTE_PREFIX = "/astrbot_plugin_box"
+FMT = "%Y-%m-%d %H:%M:%S"
+GROUP_SLEEP_SECONDS = 1  # 群与群之间稍作停歇，降低接口压力
+
+
+def _ok(data: Any = None) -> dict:
+    return {"status": "ok", "data": data}
+
+
+def _err(message: str) -> dict:
+    return {"status": "error", "message": message}
+
+
+def _query(name: str, default: str = "") -> str:
+    try:
+        if request is not None:
+            return (request.args.get(name) or default).strip()
+    except Exception:
+        pass
+    return default
+
+
+async def _body() -> dict:
+    try:
+        if request is not None:
+            return await request.get_json(silent=True) or {}
+    except Exception:
+        pass
+    return {}
+
+
+class MemberBackfiller:
+    """后台任务：遍历机器人所在群，批量入库成员群内信息与入群时间。"""
+
+    def __init__(self, cfg, store, get_bot):
+        self.cfg = cfg
+        self.store = store
+        self.get_bot = get_bot
+        self._task: asyncio.Task | None = None
+        self.state: dict[str, Any] = self._fresh_state()
+
+    @staticmethod
+    def _fresh_state() -> dict[str, Any]:
+        return {
+            "running": False,
+            "cancel": False,
+            "total_groups": 0,
+            "done_groups": 0,
+            "current_group": "",
+            "total_members": 0,
+            "recorded_members": 0,
+            "errors": 0,
+            "last_error": "",
+            "started_at": "",
+            "finished_at": "",
+        }
+
+    def status(self) -> dict[str, Any]:
+        return dict(self.state)
+
+    def start(self, only_group: str = "") -> bool:
+        if self.state["running"]:
+            return False
+        self.state = self._fresh_state()
+        self.state["running"] = True
+        self._task = asyncio.create_task(self._run(only_group))
+        return True
+
+    def cancel(self) -> None:
+        self.state["cancel"] = True
+
+    async def _run(self, only_group: str = "") -> None:
+        try:
+            bot = self.get_bot()
+            if not bot:
+                self.state["last_error"] = "未找到 OneBot 适配器"
+                return
+            groups = await bot.get_group_list()
+            if only_group:
+                groups = [g for g in groups if str(g.get("group_id")) == only_group]
+            self.state["total_groups"] = len(groups)
+            for g in groups:
+                if self.state["cancel"]:
+                    break
+                gid = str(g.get("group_id") or "")
+                self.state["current_group"] = f"{g.get('group_name') or ''}({gid})"
+                try:
+                    members = await bot.get_group_member_list(group_id=int(gid))
+                except Exception as e:
+                    self.state["errors"] += 1
+                    self.state["last_error"] = f"群 {gid} 成员列表获取失败: {e}"
+                    self.state["done_groups"] += 1
+                    continue
+                info_rows: list[tuple] = []
+                join_rows: list[tuple] = []
+                for m in members:
+                    uid = str(m.get("user_id") or "")
+                    if not uid:
+                        continue
+                    info_rows.append(
+                        (
+                            gid,
+                            uid,
+                            str(m.get("card") or ""),
+                            str(m.get("title") or ""),
+                            str(m.get("role") or ""),
+                            str(m.get("level") or ""),
+                        )
+                    )
+                    try:
+                        jt = int(m.get("join_time") or 0)
+                    except (TypeError, ValueError):
+                        jt = 0
+                    if jt > 0:
+                        try:
+                            join_rows.append((gid, uid, datetime.fromtimestamp(jt).strftime(FMT)))
+                        except (OSError, OverflowError):
+                            pass
+                try:
+                    self.store.put_member_info_many(info_rows)
+                    self.store.ensure_join_many(join_rows)
+                    self.state["recorded_members"] += len(info_rows)
+                except Exception as e:
+                    self.state["errors"] += 1
+                    self.state["last_error"] = f"群 {gid} 入库失败: {e}"
+                self.state["total_members"] += len(members)
+                self.state["done_groups"] += 1
+                await asyncio.sleep(GROUP_SLEEP_SECONDS)
+        except Exception as e:
+            self.state["errors"] += 1
+            self.state["last_error"] = str(e)
+        finally:
+            self.state["running"] = False
+            self.state["finished_at"] = datetime.now().strftime(FMT)
+            self.state["current_group"] = ""
+
+
+def register_apis(plugin, backfiller: MemberBackfiller) -> None:
+    """把面板路由注册到 AstrBot（在插件 initialize() 中调用）。"""
+
+    async def h_groups(*_args, **_kwargs) -> dict:
+        bot = backfiller.get_bot()
+        if not bot:
+            return _err("未找到 OneBot 适配器")
+        try:
+            groups = await bot.get_group_list()
+        except Exception as e:
+            return _err(f"获取群列表失败: {e}")
+        try:
+            info_counts = plugin.box.store.info_counts()
+            join_counts = plugin.box.store.join_counts()
+        except Exception as e:
+            return _err(f"读取统计失败: {e}")
+        out = []
+        for g in groups:
+            gid = str(g.get("group_id") or "")
+            out.append(
+                {
+                    "group_id": gid,
+                    "group_name": str(g.get("group_name") or ""),
+                    "member_count": int(g.get("member_count") or 0),
+                    "info_recorded": info_counts.get(gid, 0),
+                    "join_recorded": join_counts.get(gid, 0),
+                }
+            )
+        return _ok({"groups": out, "backfill": backfiller.status()})
+
+    async def h_backfill_status(*_args, **_kwargs) -> dict:
+        return _ok(backfiller.status())
+
+    async def h_backfill_start(*_args, **_kwargs) -> dict:
+        body = await _body()
+        group_id = str(body.get("group_id") or _query("group_id") or "")
+        started = backfiller.start(group_id)
+        if not started:
+            return _err("已有读取任务在进行中")
+        return _ok({"started": True, "group_id": group_id})
+
+    async def h_backfill_cancel(*_args, **_kwargs) -> dict:
+        backfiller.cancel()
+        return _ok({"cancel": True})
+
+    async def h_group_members(*_args, **_kwargs) -> dict:
+        gid = _query("group_id")
+        if not gid.isdigit():
+            return _err("缺少或非法的 group_id")
+        bot = backfiller.get_bot()
+        if not bot:
+            return _err("未找到 OneBot 适配器")
+        try:
+            members = await bot.get_group_member_list(group_id=int(gid))
+        except Exception as e:
+            return _err(f"获取成员列表失败: {e}")
+        try:
+            known_info = plugin.box.store.member_info_for_group(gid)
+            known_join = plugin.box.store.join_times_for_group(gid)
+        except Exception as e:
+            return _err(f"读取记录失败: {e}")
+        out = []
+        for m in members:
+            uid = str(m.get("user_id") or "")
+            if not uid:
+                continue
+            info = known_info.get(uid) or {}
+            jt = known_join.get(uid) or ""
+            if not jt:
+                try:
+                    api_jt = int(m.get("join_time") or 0)
+                    if api_jt > 0:
+                        jt = datetime.fromtimestamp(api_jt).strftime("%Y-%m-%d")
+                except (TypeError, ValueError, OSError, OverflowError):
+                    jt = ""
+            out.append(
+                {
+                    "user_id": uid,
+                    "name": str(m.get("card") or m.get("nickname") or uid),
+                    "title": info.get("title") or str(m.get("title") or ""),
+                    "level": info.get("level") or str(m.get("level") or ""),
+                    "role": info.get("role") or str(m.get("role") or ""),
+                    "join_recorded": bool(known_join.get(uid)),
+                    "join_time": jt,
+                    "info_recorded": uid in known_info,
+                }
+            )
+        unrecorded = sum(1 for m in out if not m["info_recorded"] or not m["join_recorded"])
+        return _ok({"group_id": gid, "total": len(out), "unrecorded": unrecorded, "members": out})
+
+    routes = [
+        ("/groups", h_groups, ["GET"]),
+        ("/backfill/status", h_backfill_status, ["GET"]),
+        ("/backfill", h_backfill_start, ["POST"]),
+        ("/backfill/cancel", h_backfill_cancel, ["POST"]),
+        ("/group/members", h_group_members, ["GET"]),
+    ]
+    for path, fn, methods in routes:
+        plugin.context.register_web_api(
+            f"{ROUTE_PREFIX}{path}", fn, methods, f"MoeCard {path}"
+        )
+    logger.info(f"[资料卡] 已注册 {len(routes)} 条成员数据面板路由（前缀 {ROUTE_PREFIX}）")

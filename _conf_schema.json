@@ -173,6 +173,12 @@
         "hint": "用本地 SQLite 数据库记录群成员入群、退群的精确时间（精确到秒）。卡片上的加群时间优先使用库里的精确值；退群成员的卡片也能显示加群/退群时间",
         "default": true
     },
+    "init_backfill": {
+        "description": "启动时自动回填成员资料",
+        "type": "bool",
+        "hint": "插件启动后自动读取所有群的成员列表入库（群昵称/头衔/等级/入群时间），12 小时内不重复；也可在「成员数据」页面手动触发",
+        "default": true
+    },
     "cache_cooldown": {
         "description": "资料卡缓存冷却（分钟）",
         "type": "int",

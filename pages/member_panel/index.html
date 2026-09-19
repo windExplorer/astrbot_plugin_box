@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>成员数据面板</title>
+<style>
+  :root {
+    --bg: #fff7fa; --card: #ffffff; --text: #4a3b47; --muted: #a8889a;
+    --accent: #d65492; --accent-soft: #ffe8f1; --line: #f5dce8;
+    --ok: #2f9e63; --ok-soft: #e3f6ec; --warn: #d0722f; --warn-soft: #fdf0e3;
+  }
+  body.dark {
+    --bg: #2a2230; --card: #372c3f; --text: #f0e4ec; --muted: #a58ba0;
+    --accent: #f088bd; --accent-soft: #463449; --line: #4d3d56;
+    --ok: #6fd3a0; --ok-soft: #2e4237; --warn: #e8a76d; --warn-soft: #463829;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font-family: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px;
+  }
+  header h1 { margin: 0 0 4px; font-size: 20px; color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; margin-bottom: 12px;
+  }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: #d0455c; border-color: #eab8c2; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #statusBar { font-size: 13px; min-height: 20px; margin-bottom: 10px; color: var(--muted); }
+  #statusBar b { color: var(--accent); }
+  .bar { height: 8px; background: var(--accent-soft); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .muted { color: var(--muted); }
+  .gname { font-weight: 600; }
+  .gid { color: var(--muted); font-size: 12px; }
+  .progress-cell { min-width: 140px; }
+  .rowbtn { display: flex; gap: 6px; }
+  #drawer h2 { font-size: 16px; margin: 0 0 8px; }
+  .drawer-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .drawer-head select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--muted); font-size: 13px; }
+  #err { color: #d0455c; font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+  .notice { padding: 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌸 成员数据面板</h1>
+  <div class="sub">萌萌资料卡 · 查看各群成员资料记录情况，支持一键回填（退群/被踢卡的信息来源）</div>
+</header>
+
+<div class="card" id="statusCard" hidden>
+  <div id="statusBar"></div>
+  <div class="bar"><i id="statusBarFill" style="width:0%"></i></div>
+</div>
+
+<div class="actions">
+  <button id="btnRefresh">🔄 刷新</button>
+  <button id="btnAll" class="primary">📖 一键读取全部群</button>
+  <button id="btnCancel" class="danger" hidden>✕ 取消任务</button>
+</div>
+
+<div id="groups"></div>
+
+<div class="card" id="drawer" hidden>
+  <div class="drawer-head">
+    <h2 id="drawerTitle">成员列表</h2>
+    <select id="filter">
+      <option value="all">全部成员</option>
+      <option value="unrecorded">仅看缺记录</option>
+    </select>
+    <span style="flex:1"></span>
+    <button id="btnClose">收起</button>
+  </div>
+  <div id="memberInfo" class="muted" style="margin-bottom:6px"></div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>QQ 号</th><th>昵称 / 群昵称</th><th>群头衔</th><th>群等级</th>
+        <th>入群时间（记录）</th><th>状态</th>
+      </tr></thead>
+      <tbody id="memberRows"></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <button id="pgPrev">上一页</button>
+    <span id="pgInfo"></span>
+    <button id="pgNext">下一页</button>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script>
+(function () {
+  "use strict";
+  var PAGE_SIZE = 100;
+  var bridge = null, groups = [], members = [], memberFilter = "all",
+      page = 0, currentGid = "", currentName = "", pollTimer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function fail(msg) { $("err").textContent = msg || ""; }
+  function pill(ok, okText, warnText) {
+    return '<span class="pill ' + (ok ? "ok" : "warn") + '">' + (ok ? okText : warnText) + "</span>";
+  }
+
+  function waitBridge(timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var start = Date.now();
+      (function poll() {
+        var b = window.AstrBotPluginPage;
+        if (b && typeof b.apiGet === "function") return resolve(b);
+        if (Date.now() - start > (timeoutMs || 4000))
+          return reject(new Error("未检测到 AstrBot 插件 Page 桥接，请从 AstrBot 后台的插件拓展页打开本页面"));
+        setTimeout(poll, 120);
+      })();
+    });
+  }
+
+  function renderGroups() {
+    if (!groups.length) {
+      $("groups").innerHTML = '<div class="card muted">尚未获取到群列表（机器人可能还没连上适配器），稍后点「刷新」重试。</div>';
+      return;
+    }
+    var html = "";
+    groups.forEach(function (g) {
+      var total = g.member_count || 0;
+      var info = g.info_recorded || 0;
+      var pct = total ? Math.round(info * 100 / total) : 100;
+      var unrec = Math.max(total - info, 0);
+      html += '<div class="card">' +
+        '<table><tr><td style="width:40%">' +
+          '<div class="gname">' + esc(g.group_name || "未命名群") + '</div>' +
+          '<div class="gid">' + esc(g.group_id) + '</div>' +
+        '</td><td class="num">' + total + ' 人</td>' +
+        '<td class="progress-cell">' +
+          '<div class="muted">已记录 ' + info + ' / ' + total + (unrec ? '（缺 ' + unrec + '）' : '（齐啦）') + '</div>' +
+          '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+        '</td>' +
+        '<td>' + pill(info >= total && total > 0, "已记录", "缺记录") + '</td>' +
+        '<td><div class="rowbtn">' +
+          '<button onclick="PAGE.backfill(\'' + esc(g.group_id) + '\')">读取该群</button>' +
+          '<button onclick="PAGE.members(\'' + esc(g.group_id) + '\', \'' + esc(g.group_name || "") + '\')">查看成员</button>' +
+        '</div></td></tr></table></div>';
+    });
+    $("groups").innerHTML = html;
+  }
+
+  function renderStatus(st) {
+    var running = st.running;
+    $("statusCard").hidden = !(running || st.total_groups);
+    $("btnCancel").hidden = !running;
+    $("btnAll").disabled = running;
+    if (!running && st.total_groups) {
+      $("statusBar").innerHTML = "上次读取：<b>" + esc(st.finished_at || "") + "</b>，完成 " +
+        st.done_groups + "/" + st.total_groups + " 群，记录 " + st.recorded_members + " 名成员" +
+        (st.errors ? '，<span style="color:#d0455c">错误 ' + st.errors + '（' + esc(st.last_error) + '）</span>' : "");
+      $("statusBarFill").style.width = "100%";
+      return;
+    }
+    if (running) {
+      var pct = st.total_groups ? Math.round(st.done_groups * 100 / st.total_groups) : 0;
+      $("statusBar").innerHTML = "正在读取：<b>" + esc(st.current_group || "…") + "</b>（" +
+        st.done_groups + "/" + st.total_groups + " 群，已记录 " + st.recorded_members + " 人" +
+        (st.errors ? "，错误 " + st.errors : "") + "）";
+      $("statusBarFill").style.width = pct + "%";
+    }
+  }
+
+  function pollStatus() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      bridge.apiGet("backfill/status").then(function (st) {
+        renderStatus(st);
+        if (!st.running && st.finished_at) { refresh(); }
+      }).catch(function () {});
+    }, 1500);
+  }
+
+  function refresh() {
+    return bridge.apiGet("groups").then(function (d) {
+      groups = d.groups || [];
+      renderGroups();
+      renderStatus(d.backfill || {});
+    }).catch(function (e) { fail("加载失败：" + e.message); });
+  }
+
+  function renderMembers() {
+    var list = members;
+    if (memberFilter === "unrecorded") {
+      list = members.filter(function (m) { return !m.info_recorded || !m.join_recorded; });
+    }
+    var pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+    if (page >= pages) page = pages - 1;
+    var slice = list.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+    var html = "";
+    if (!slice.length) html = '<tr><td colspan="6" class="muted">没有符合条件的成员</td></tr>';
+    slice.forEach(function (m) {
+      var ok = m.info_recorded && m.join_recorded;
+      html += "<tr><td class='num'>" + esc(m.user_id) + "</td><td>" + esc(m.name) + "</td><td>" +
+        esc(m.title || "—") + "</td><td class='num'>" + esc(m.level || "—") + "</td><td>" +
+        esc(m.join_time || "—") + "</td><td>" +
+        pill(!!ok, "已记录", (!m.join_recorded ? "缺入群时间" : "缺群内信息")) + "</td></tr>";
+    });
+    $("memberRows").innerHTML = html;
+    $("pgInfo").textContent = "第 " + (page + 1) + " / " + pages + " 页 · 共 " + list.length + " 人";
+    $("memberInfo").textContent = currentName + "（" + currentGid + "）共 " + members.length + " 人，缺记录 " +
+      members.filter(function (m) { return !m.info_recorded || !m.join_recorded; }).length + " 人";
+  }
+
+  window.PAGE = {
+    backfill: function (gid) {
+      bridge.apiPost("backfill", gid ? { group_id: gid } : {})
+        .then(function () { pollStatus(); })
+        .catch(function (e) { fail(e.message); });
+    },
+    members: function (gid, name) {
+      currentGid = gid; currentName = name; page = 0;
+      $("drawer").hidden = false;
+      $("drawerTitle").textContent = "成员列表 · " + (name || gid);
+      $("memberRows").innerHTML = '<tr><td colspan="6" class="muted">加载中…</td></tr>';
+      bridge.apiGet("group/members", { group_id: gid }).then(function (d) {
+        members = d.members || [];
+        renderMembers();
+      }).catch(function (e) { fail(e.message); });
+    }
+  };
+
+  $("btnRefresh").onclick = function () { fail(""); refresh(); };
+  $("btnAll").onclick = function () { window.PAGE.backfill(""); };
+  $("btnCancel").onclick = function () { bridge.apiPost("backfill/cancel", {}).catch(function () {}); };
+  $("btnClose").onclick = function () { $("drawer").hidden = true; };
+  $("filter").onchange = function () { memberFilter = this.value; page = 0; renderMembers(); };
+  $("pgPrev").onclick = function () { if (page > 0) { page--; renderMembers(); } };
+  $("pgNext").onclick = function () { page++; renderMembers(); };
+
+  waitBridge(4000).then(function (b) {
+    bridge = b;
+    try {
+      var ctx = b.getContext && b.getContext();
+      if (ctx && ctx.isDark) document.body.classList.add("dark");
+    } catch (e) { /* sandbox 下忽略 */ }
+    refresh().then(pollStatus);
+  }).catch(function (e) {
+    document.body.innerHTML = '<div class="notice">' + esc(e.message) +
+      '<br><br>本页面用于查看「萌萌资料卡」记录的成员数据，请从 AstrBot 管理面板的插件拓展页打开。</div>';
+  });
+})();
+</script>
+</body>
+</html>

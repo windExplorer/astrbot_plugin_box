@@ -1,6 +1,6 @@
 import asyncio
 import weakref
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiocqhttp import CQHttp
 
@@ -37,6 +37,7 @@ class BoxPlugin(Star):
                 "draw",
                 "config",
                 "service",
+                "webui_api",
             ):
                 try:
                     _mod = importlib.import_module(f"{__package__}.core.{_dep_name}")
@@ -53,12 +54,79 @@ class BoxPlugin(Star):
         self.cfg = _PluginConfig(config, context)
         self.box = _BoxService(self.cfg)
         self._recall_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
+        self._backfiller = None
+        self._backfill_task: asyncio.Task | None = None
+
+    async def initialize(self) -> None:
+        """AstrBot 插件生命周期钩子：注册面板路由 + 启动初始化回填。"""
+        try:
+            from .core.webui_api import MemberBackfiller, register_apis
+        except ImportError:  # 平铺调试
+            from webui_api import MemberBackfiller, register_apis  # type: ignore
+
+        self._backfiller = MemberBackfiller(self.cfg, self.box.store, self._get_bot)
+        try:
+            register_apis(self, self._backfiller)
+        except Exception as e:
+            logger.warning(f"[资料卡] 面板路由注册失败: {e}")
+
+        if self.cfg.init_backfill:
+            self._backfill_task = asyncio.create_task(self._safe_init_backfill())
+
+    def _get_bot(self):
+        """鸭子类型找 OneBot 适配器的 bot 客户端（可能尚未连接，返回 None）。"""
+        try:
+            for adapter in self.context.platform_manager.get_insts():
+                if hasattr(adapter, "bot") and adapter.bot and hasattr(adapter.bot, "api"):
+                    return adapter.bot
+        except Exception:
+            pass
+        return None
+
+    async def _safe_init_backfill(self) -> None:
+        """等适配器就绪后，对全部群做一次成员资料回填（12 小时内不重复）。"""
+        for _ in range(24):
+            if self._get_bot():
+                break
+            await asyncio.sleep(5)
+        else:
+            logger.warning("[资料卡] 初始化回填跳过：适配器迟迟未就绪")
+            return
+        last = ""
+        try:
+            last = self.box.store.get_meta("last_init_backfill")
+        except Exception:
+            pass
+        if last:
+            try:
+                if datetime.now() - datetime.strptime(last, "%Y-%m-%d %H:%M:%S") < timedelta(hours=12):
+                    logger.info("[资料卡] 12 小时内已做过初始化回填，跳过（可在面板手动触发）")
+                    return
+            except ValueError:
+                pass
+        logger.info("[资料卡] 开始初始化成员资料回填……")
+        self._backfiller.start()
+        while self._backfiller.state["running"]:
+            await asyncio.sleep(2)
+        self.box.store.set_meta("last_init_backfill", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        st = self._backfiller.state
+        logger.info(
+            f"[资料卡] 初始化回填完成：{st['done_groups']}/{st['total_groups']} 群，"
+            f"记录 {st['recorded_members']} 名成员，错误 {st['errors']}"
+        )
 
     async def terminate(self):
         if self._recall_tasks:
             for t in list(self._recall_tasks):
                 t.cancel()
             await asyncio.gather(*self._recall_tasks, return_exceptions=True)
+        if self._backfill_task and not self._backfill_task.done():
+            self._backfiller.cancel()
+            self._backfill_task.cancel()
+            try:
+                await self._backfill_task
+            except asyncio.CancelledError:
+                pass
         try:
             self.box.store.close()
         except Exception:

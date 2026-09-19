@@ -66,6 +66,7 @@ if (Test-Path $zipPath) {
 $includeList = @(
     "main.py",
     "core",
+    "pages",
     "_conf_schema.json",
     "metadata.yaml",
     "requirements.txt",

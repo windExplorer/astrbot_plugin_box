@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS member_info (
     level TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -139,6 +143,81 @@ class MemberStore:
         if not row:
             return None
         return {"card": row[0], "title": row[1], "role": row[2], "level": row[3]}
+
+    # ------------------------------------------------------ 批量回填与统计
+    def put_member_info_many(self, rows: list[tuple]) -> None:
+        """批量写入成员群内信息（rows: group_id, user_id, card, title, role, level）。"""
+        now = _fmt(datetime.now())
+        data = [(g, u, c, t, r, l, now) for (g, u, c, t, r, l) in rows]
+        if not data:
+            return
+        with self._lock:
+            self._conn.executemany(
+                """
+                INSERT OR REPLACE INTO member_info (group_id, user_id, card, title, role, level, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                data,
+            )
+            self._conn.commit()
+
+    def ensure_join_many(self, rows: list[tuple]) -> None:
+        """批量回填入群时间（rows: group_id, user_id, join_time 文本）；已有精确值不被覆盖。"""
+        if not rows:
+            return
+        with self._lock:
+            self._conn.executemany(
+                """
+                INSERT OR IGNORE INTO member_times (group_id, user_id, join_time, leave_time)
+                VALUES (?, ?, ?, '')
+                """,
+                rows,
+            )
+            self._conn.commit()
+
+    def info_counts(self) -> dict[str, int]:
+        """各群已记录群内信息的成员数。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT group_id, COUNT(*) FROM member_info GROUP BY group_id"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def join_counts(self) -> dict[str, int]:
+        """各群已记录入群时间的成员数。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT group_id, COUNT(*) FROM member_times WHERE join_time != '' GROUP BY group_id"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def member_info_for_group(self, group_id: str) -> dict[str, dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT user_id, card, title, role, level FROM member_info WHERE group_id = ?",
+                (group_id,),
+            ).fetchall()
+        return {r[0]: {"card": r[1], "title": r[2], "role": r[3], "level": r[4]} for r in rows}
+
+    def join_times_for_group(self, group_id: str) -> dict[str, str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT user_id, join_time FROM member_times WHERE group_id = ? AND join_time != ''",
+                (group_id,),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def get_meta(self, key: str) -> str:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else ""
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         with self._lock:
