@@ -28,7 +28,6 @@ ROW_BG = (247, 243, 246)
 LABEL_COLOR = (186, 108, 143)
 TEXT_DARK = (72, 66, 82)
 TITLE_COLOR = (82, 58, 78)
-SUBTITLE_COLOR = (255, 255, 255, 235)
 SIGN_COLOR = (129, 82, 108)
 ANALYSIS_BG = (255, 246, 228)
 ANALYSIS_LABEL = (196, 138, 46)
@@ -605,6 +604,39 @@ class CardMaker:
             tw = self._measure(time_text, font)
             fdraw.text((CARD_W - PAD - tw, cy), time_text, font=font, fill=(*FOOTER_TEXT, 235))
 
+    def _paint_qq_digits(self, img: Image.Image, draw: ImageDraw.ImageDraw, x: float, y: float, qq: str) -> None:
+        """Draw the QQ number as one cute tilted white square per digit.
+
+        White digits-on-pink was unreadable; each digit now sits on its own
+        solid white rounded tile, alternately tilted for the moe look.
+        """
+        label_font = self._font(SUBTITLE_SIZE)
+        label_h = sum(label_font.getmetrics())
+        draw.text((x, y), "QQ", font=label_font, fill=(*SIGN_COLOR, 255))
+        x += self._measure("QQ", label_font) + 12
+
+        digit_font = self._font(22)
+        digit_ascent, digit_descent = digit_font.getmetrics()
+        digit_lh = digit_ascent + digit_descent
+        tile = 34
+        center_y = y + label_h / 2
+        for i, ch in enumerate(qq):
+            if not ch.isdigit():
+                continue
+            tile_img = Image.new("RGBA", (tile + 8, tile + 8), (0, 0, 0, 0))
+            tdraw = ImageDraw.Draw(tile_img)
+            tdraw.rounded_rectangle([4, 4, 4 + tile, 4 + tile], 9, fill=(255, 255, 255, 255))
+            char_w = digit_font.getlength(ch)
+            tdraw.text(
+                (4 + (tile - char_w) / 2, 4 + (tile - digit_lh) / 2),
+                ch,
+                font=digit_font,
+                fill=(*TITLE_COLOR, 255),
+            )
+            tile_img = tile_img.rotate(4 if i % 2 else -4, resample=Image.BICUBIC)
+            img.alpha_composite(tile_img, (int(x), int(center_y - tile_img.height / 2)))
+            x += tile + 5
+
     def _paint_header_content(
         self,
         img: Image.Image,
@@ -656,15 +688,14 @@ class CardMaker:
                     img, draw, (rest_x, title_center - rest_lh / 2), m["rest"], m["font"], (*TITLE_COLOR, 255)
                 )
 
-        # QQ line
+        # QQ line: "QQ" label + one cute tilted square per digit
         sub_y = title_y + title_h + 8
-        sub_font = self._font(SUBTITLE_SIZE)
         if qq:
-            self._draw_mixed(img, draw, (text_x + 2, sub_y), f"QQ {qq}", sub_font, SUBTITLE_COLOR)
+            self._paint_qq_digits(img, draw, text_x + 2, sub_y, qq)
         # signature line(s)
         if sig:
             sig_font = self._font(SIGN_SIZE)
-            sig_y = sub_y + sum(sub_font.getmetrics()) + 12
+            sig_y = sub_y + sum(self._font(SUBTITLE_SIZE).getmetrics()) + 12
             sig_lh = sum(sig_font.getmetrics())
             lines = self._wrap(sig, sig_font, avail)
             if len(lines) > 2:
