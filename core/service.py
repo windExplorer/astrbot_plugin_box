@@ -10,7 +10,7 @@ from astrbot.api import logger
 
 from .config import PluginConfig
 from .draw import CardMaker
-from .profile import BoxUserProfile, friendly_duration, join_days_suffix
+from .profile import BoxUserProfile, friendly_duration, join_duration_suffix
 from .store import MemberStore
 
 library_display_options = [
@@ -237,7 +237,7 @@ class BoxService:
                 replaced = False
                 for i, line in enumerate(display):
                     if line.startswith("加群时间："):
-                        display[i] = f"加群时间：{db_join}{join_days_suffix(member_info.get('join_time'))}"
+                        display[i] = f"加群时间：{db_join}{join_duration_suffix(member_info.get('join_time'))}"
                         replaced = True
                         break
                 if not replaced and not member_info:

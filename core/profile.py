@@ -9,13 +9,16 @@ from typing import Any, ClassVar
 from zhdate import ZhDate
 
 
-def join_days_suffix(join_time: Any) -> str:
-    """Human-readable "已入群 N 天" suffix; empty on bad/missing input."""
+def join_duration_suffix(join_time: Any) -> str:
+    """Human-readable "已入群 <时长>" suffix; empty on bad/missing input."""
     try:
-        days = max((datetime.now() - datetime.fromtimestamp(int(join_time))).days, 0)
-        return f"（已入群 {days} 天）"
+        joined_at = datetime.fromtimestamp(int(join_time))
     except (TypeError, ValueError, OSError, OverflowError):
         return ""
+    duration = friendly_duration(datetime.now() - joined_at)
+    if duration == "不到 1 秒":
+        return "（刚刚加入）"
+    return f"（已入群 {duration}）"
 
 
 def friendly_duration(delta: Any) -> str:
@@ -401,7 +404,7 @@ class BoxUserProfile:
                 if self.join_time:
                     try:
                         join_date = datetime.fromtimestamp(int(self.join_time)).strftime("%Y-%m-%d")
-                        return [f"{label}：{join_date}{join_days_suffix(self.join_time)}"]
+                        return [f"{label}：{join_date}{join_duration_suffix(self.join_time)}"]
                     except (TypeError, ValueError, OSError, OverflowError):
                         return []
                 return []
