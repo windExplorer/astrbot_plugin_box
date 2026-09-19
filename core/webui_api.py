@@ -85,17 +85,6 @@ class MemberBackfiller:
 
     MODEL_KEYS = ("welcome", "avatar", "signature", "overall", "fallback")
 
-    def _selection(self) -> dict[str, str]:
-        try:
-            sel = json.loads(self.store.get_meta("model_selection") or "{}")
-        except Exception:
-            sel = {}
-        return {k: str(sel.get(k) or "") for k in self.MODEL_KEYS}
-
-    def set_selection(self, selection: dict[str, str]) -> None:
-        clean = {k: str(selection.get(k) or "").strip() for k in self.MODEL_KEYS}
-        self.store.set_meta("model_selection", json.dumps(clean, ensure_ascii=False))
-
     def status(self) -> dict[str, Any]:
         return dict(self.state)
 
@@ -319,7 +308,7 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
             {
                 "providers": providers,
                 "using_id": using_id,
-                "selection": backfiller.selection(),
+                "selection": plugin.box.get_model_selection(),
             }
         )
 
@@ -328,9 +317,12 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         selection = body.get("selection")
         if not isinstance(selection, dict):
             return _err("缺少 selection 字段")
-        backfiller.set_selection(selection)
-        logger.info(f"[资料卡] 模型选择已更新: {backfiller.selection()}")
-        return _ok({"selection": backfiller.selection()})
+        try:
+            plugin.box.set_model_selection(selection)
+        except Exception as e:
+            return _err(f"保存失败: {e}")
+        logger.info(f"[资料卡] 模型选择已更新: {plugin.box.get_model_selection()}")
+        return _ok({"selection": plugin.box.get_model_selection()})
 
     routes = [
         ("/groups", h_groups, ["GET"]),

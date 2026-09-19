@@ -104,6 +104,16 @@ class AIAnalysisConfig(ConfigNode):
     event_analysis: bool
 
 
+class LLMModelsConfig(ConfigNode):
+    """各 LLM 调用点的模型选择；面板「模型设置」下拉与本配置块读写同一份数据。"""
+
+    fallback: str
+    welcome: str
+    avatar: str
+    signature: str
+    overall: str
+
+
 class PluginConfig(ConfigNode):
     only_admin: bool
     protect_ids: list[str]
@@ -116,6 +126,7 @@ class PluginConfig(ConfigNode):
     init_backfill: bool
     cache_cooldown: int
     max_concurrent: int
+    llm_models: LLMModelsConfig
     welcome_enabled: bool
     welcome_text: str
     welcome_images: list

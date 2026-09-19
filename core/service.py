@@ -72,20 +72,31 @@ class BoxService:
         self.renderer = CardMaker()
         self.store = MemberStore(cfg.data_dir / "member_times.db")
         self._semaphore = asyncio.Semaphore(max(1, int(cfg.max_concurrent or 1)))
-        # v0.10.0 的模型文本配置迁移到面板设置（meta 表）；仅当面板从未保存过时迁移一次
+        # 模型选择迁移：面板 meta（v0.11.0）与旧版扁平配置键（v0.10.0）→ llm_models 配置块
         try:
-            if not self.store.get_meta("model_selection"):
-                legacy = {
-                    "welcome": str(cfg._data.get("welcome_ai_model") or ""),
-                    "fallback": str(cfg._data.get("llm_fallback_model") or ""),
+            m = cfg.llm_models
+            if not any([m.fallback, m.welcome, m.avatar, m.signature, m.overall]):
+                legacy = {}
+                try:
+                    legacy = json.loads(self.store.get_meta("model_selection") or "{}")
+                except Exception:
+                    legacy = {}
+                flat = {
+                    "welcome": cfg._data.get("welcome_ai_model"),
+                    "fallback": cfg._data.get("llm_fallback_model"),
                 }
                 sub = cfg._data.get("ai_analysis")
                 if isinstance(sub, dict):
                     for k in ("avatar", "signature", "overall"):
-                        legacy[k] = str(sub.get(f"{k}_model") or "")
-                if any(legacy.values()):
-                    self.store.set_meta("model_selection", json.dumps(legacy))
-                    logger.info("[资料卡] 已将旧版模型文本配置迁移到面板「模型设置」")
+                        flat[k] = sub.get(f"{k}_model")
+                for k in self.MODEL_KEYS:
+                    v = str(legacy.get(k) or flat.get(k) or "").strip()
+                    if v:
+                        setattr(m, k, v)
+                if any([m.fallback, m.welcome, m.avatar, m.signature, m.overall]):
+                    cfg.save_config()
+                    logger.info("[资料卡] 已迁移旧版模型配置到 llm_models 配置块")
+                self.store.set_meta("model_selection", "")
         except Exception:
             pass
 
@@ -413,22 +424,27 @@ class BoxService:
             return result
 
     # ------------------------------------------------------------ 欢迎语
-    def _model_sel(self, key: str) -> str:
-        """读取面板「模型设置」里的选择（meta 表 model_selection JSON）。"""
-        try:
-            sel = json.loads(self.store.get_meta("model_selection") or "{}")
-        except Exception:
-            sel = {}
-        return str(sel.get(key) or "").strip()
+    MODEL_KEYS = ("welcome", "avatar", "signature", "overall", "fallback")
+
+    def get_model_selection(self) -> dict[str, str]:
+        m = self.cfg.llm_models
+        return {k: str(getattr(m, k, "") or "") for k in self.MODEL_KEYS}
+
+    def set_model_selection(self, selection: dict[str, str]) -> None:
+        m = self.cfg.llm_models
+        for k in self.MODEL_KEYS:
+            setattr(m, k, str(selection.get(k) or "").strip())
+        self.cfg.save_config()
 
     def _resolve_llm(self, site_key: str) -> tuple[Any, str | None]:
-        """解析 LLM 调用目标：该功能的选择 > 兜底模型 > 系统默认。
+        """解析 LLM 调用目标：该功能的模型 > 兜底模型 > 系统默认。
 
         模型格式：``提供商ID/模型名``（跨提供商路由）或 ``模型名``（用系统默认提供商）。
         返回 (provider, model_name)；model_name 为 None 时用该提供商的默认模型。
         """
         context = self.cfg.context
-        model = self._model_sel(site_key) or self._model_sel("fallback")
+        models = self.cfg.llm_models
+        model = str(getattr(models, site_key, "") or "").strip() or str(models.fallback or "").strip()
         if not model:
             return context.get_using_provider(), None
         if "/" in model:
