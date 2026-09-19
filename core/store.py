@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS card_cache (
     card_type  TEXT NOT NULL DEFAULT '',
     image      BLOB NOT NULL,
     PRIMARY KEY (group_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS member_info (
+    group_id   TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
+    card  TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    role  TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, user_id)
 )
 """
 
@@ -100,6 +110,35 @@ class MemberStore:
                 (group_id, user_id, _fmt(when)),
             )
             self._conn.commit()
+
+    def put_member_info(self, group_id: str, user_id: str, card: str, title: str, role: str, level: str) -> None:
+        """Last-known group metadata (title/level/...), for leaver/kick cards."""
+        now = _fmt(datetime.now())
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO member_info (group_id, user_id, card, title, role, level, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(group_id, user_id) DO UPDATE SET
+                    card = excluded.card,
+                    title = excluded.title,
+                    role = excluded.role,
+                    level = excluded.level,
+                    updated_at = excluded.updated_at
+                """,
+                (group_id, user_id, card, title, role, level, now),
+            )
+            self._conn.commit()
+
+    def get_member_info(self, group_id: str, user_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT card, title, role, level FROM member_info WHERE group_id = ? AND user_id = ?",
+                (group_id, user_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {"card": row[0], "title": row[1], "role": row[2], "level": row[3]}
 
     def close(self) -> None:
         with self._lock:

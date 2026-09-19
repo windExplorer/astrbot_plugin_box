@@ -163,6 +163,16 @@ class BoxService:
         db_leave = ""
         if group_id and self.cfg.record_join_leave:
             try:
+                if member_info:
+                    # 最后已知的群内信息（头衔/等级等），退群/被踢后接口查不到，靠这份缓存展示
+                    self.store.put_member_info(
+                        group_id,
+                        target_id,
+                        card=str(member_info.get("card") or ""),
+                        title=str(member_info.get("title") or ""),
+                        role=str(member_info.get("role") or ""),
+                        level=str(member_info.get("level") or ""),
+                    )
                 if member_info.get("join_time"):
                     self.store.ensure_join(
                         group_id,
@@ -187,7 +197,8 @@ class BoxService:
             if not replaced and not member_info:
                 display.append(f"加群时间：{db_join}")
         if db_leave and not member_info:
-            display.append(f"退群时间：{db_leave}")
+            leave_label = "被踢时间" if card_type == "kick" else "退群时间"
+            display.append(f"{leave_label}：{db_leave}")
         if force_times and db_join and db_leave:
             try:
                 join_dt = datetime.strptime(db_join, "%Y-%m-%d %H:%M:%S")
@@ -195,6 +206,22 @@ class BoxService:
                 display.append(f"在群时长：{max((leave_dt - join_dt).days, 0)} 天")
             except ValueError:
                 pass
+        if force_times and not member_info and group_id:
+            # 群等级/群头衔取最后已知值（人已不在群里，接口查不到）
+            try:
+                known = self.store.get_member_info(group_id, target_id)
+            except Exception as e:
+                logger.warning(f"[资料卡] 读取成员信息缓存失败: {e}")
+                known = None
+            if known:
+                lv = known.get("level")
+                try:
+                    if lv and int(lv) > 0:
+                        display.append(f"群等级：{int(lv)}级")
+                except (TypeError, ValueError):
+                    pass
+                if known.get("title"):
+                    display.append(f"群头衔：{known['title']}")
         if card_type == "kick" and operator_id:
             operator_name = ""
             try:
