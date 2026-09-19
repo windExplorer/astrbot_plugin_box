@@ -311,6 +311,10 @@ class BoxService:
             return None
         if not cached:
             return None
+        if cached["card_type"]:
+            # 事件卡（入群/退群/被踢）不属于普通查询：老版本写入的残留直接视为未命中，
+            # 让本次实时获取的正常卡覆盖它
+            return None
         try:
             fetched_at = datetime.strptime(cached["fetched_at"], "%Y-%m-%d %H:%M:%S")
         except ValueError:
