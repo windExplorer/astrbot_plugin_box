@@ -126,6 +126,11 @@ class BoxService:
                     level_text = profile._format_qq_level(int(profile.qq_level))
                 except (TypeError, ValueError):
                     level_text = ""
+            else:
+                logger.info(
+                    "[资料卡] 陌生人接口未返回有效的 QQ 等级数据（qqLevel/level 缺失或为 0），"
+                    f"本次返回字段: {sorted(stranger_info.keys())}"
+                )
         display = [line for line in display if not line.startswith("QQ等级：")]
 
         result = BoxResult(

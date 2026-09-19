@@ -161,7 +161,7 @@ class BoxUserProfile:
             vip_level=stranger.get("vip_level"),
             group_level=member.get("level"),
             join_time=member.get("join_time"),
-            qq_level=stranger.get("qqLevel"),
+            qq_level=cls._pick_qq_level(stranger),
             reg_time=stranger.get("reg_time"),
             login_days=stranger.get("login_days"),
             hide_qq_level=bool(stranger.get("isHideQQLevel")),
@@ -180,6 +180,22 @@ class BoxUserProfile:
             emails=library.get("emails") or [],
             addresses=library.get("addresses") or [],
         )
+
+    @staticmethod
+    def _pick_qq_level(stranger: dict[str, Any]) -> Any:
+        """Pick the QQ level from differently-named adapter fields.
+
+        NapCat/LLOneBot/Lagrange use different key names (and some return 0
+        when unknown), so try the known aliases and treat 0/absent as missing.
+        """
+        for key in ("qqLevel", "qq_level", "level"):
+            value = stranger.get(key)
+            try:
+                if value is not None and int(value) > 0:
+                    return value
+            except (TypeError, ValueError):
+                continue
+        return None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BoxUserProfile:
@@ -324,9 +340,12 @@ class BoxUserProfile:
                     return [f"{label}：{self.vip_level}"]
                 return []
             case "level":
-                return (
-                    [f"{label}：{int(self.group_level)}级"] if self.group_level else []
-                )
+                # 部分适配器把群等级返回成字符串 "0"（truthy），需转 int 后按 0 过滤
+                try:
+                    level_value = int(self.group_level)
+                except (TypeError, ValueError):
+                    return []
+                return [f"{label}：{level_value}级"] if level_value > 0 else []
             case "join_time":
                 if self.join_time:
                     return [
@@ -432,7 +451,7 @@ class BoxUserProfile:
         for icon, value in zip(icons, levels):
             count, level = divmod(level, value)
             result += icon * count
-        result += f"({original_level})"
+        result += f" {original_level}级"
         return result
 
     def _get_constellation(self, month: int, day: int) -> str:
