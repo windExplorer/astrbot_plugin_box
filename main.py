@@ -1,5 +1,6 @@
 import asyncio
 import weakref
+from datetime import datetime
 
 from aiocqhttp import CQHttp
 
@@ -32,6 +33,7 @@ class BoxPlugin(Star):
                 "field_mapping",
                 "library",
                 "utils",
+                "store",
                 "draw",
                 "config",
                 "service",
@@ -159,13 +161,27 @@ class BoxPlugin(Star):
             and raw.get("sub_type") == "leave"
         )
 
-        if not (
-            (is_enter and self.cfg.autobox.enter) or (is_exit and self.cfg.autobox.exit)
-        ):
+        if not (is_enter or is_exit):
             return
 
         group_id = str(raw.get("group_id"))
         user_id = str(raw.get("user_id"))
+
+        # 先把精确到秒的入群/退群时间记进本地库（与自动展示开关无关）
+        if self.cfg.record_join_leave:
+            try:
+                now = datetime.now()
+                if is_enter:
+                    self.box.store.record_join(group_id, user_id, now)
+                else:
+                    self.box.store.record_leave(group_id, user_id, now)
+            except Exception as e:
+                logger.warning(f"[资料卡] 记录入退群时间失败: {e}")
+
+        if not (
+            (is_enter and self.cfg.autobox.enter) or (is_exit and self.cfg.autobox.exit)
+        ):
+            return
 
         if (
             self.cfg.autobox.white_groups

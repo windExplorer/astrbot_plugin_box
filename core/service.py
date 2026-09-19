@@ -10,6 +10,7 @@ from astrbot.api import logger
 from .config import PluginConfig
 from .draw import CardMaker
 from .profile import BoxUserProfile
+from .store import MemberStore
 
 library_display_options = [
     "names",
@@ -57,6 +58,7 @@ class BoxService:
     def __init__(self, cfg: PluginConfig):
         self.cfg = cfg
         self.renderer = CardMaker()
+        self.store = MemberStore(cfg.data_dir / "member_times.db")
 
     async def get_box_info(
         self,
@@ -132,6 +134,33 @@ class BoxService:
                     f"本次返回字段: {sorted(stranger_info.keys())}"
                 )
         display = [line for line in display if not line.startswith("QQ等级：")]
+
+        # 入群/退群精确时间：优先使用本地数据库记录（退群成员接口查不到，只能靠库）
+        show_join = "join_time" in enabled or "加群时间" in enabled
+        if group_id and self.cfg.record_join_leave:
+            try:
+                if member_info.get("join_time"):
+                    self.store.ensure_join(
+                        group_id,
+                        target_id,
+                        datetime.fromtimestamp(int(member_info["join_time"])),
+                    )
+                record = self.store.get(group_id, target_id)
+                db_join = record[0] if record else ""
+                db_leave = record[1] if record else ""
+                if db_join and show_join:
+                    replaced = False
+                    for i, line in enumerate(display):
+                        if line.startswith("加群时间："):
+                            display[i] = f"加群时间：{db_join}"
+                            replaced = True
+                            break
+                    if not replaced and not member_info:
+                        display.append(f"加群时间：{db_join}")
+                if db_leave and not member_info:
+                    display.append(f"退群时间：{db_leave}")
+            except Exception as e:
+                logger.warning(f"[资料卡] 读取本地时间库失败: {e}")
 
         result = BoxResult(
             target_id=target_id,

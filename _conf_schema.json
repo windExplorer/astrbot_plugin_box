@@ -154,6 +154,12 @@
             }
         }
     },
+    "record_join_leave": {
+        "description": "记录入群/退群精确时间",
+        "type": "bool",
+        "hint": "用本地 SQLite 数据库记录群成员入群、退群的精确时间（精确到秒）。卡片上的加群时间优先使用库里的精确值；退群成员的卡片也能显示加群/退群时间",
+        "default": true
+    },
     "mystery_url": {
         "description": "拓展配置项",
         "hint": "无需填写，仅供开发人员使用",

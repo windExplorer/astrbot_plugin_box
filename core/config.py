@@ -9,7 +9,10 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from astrbot.api import logger
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.star.context import Context
-from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.core.utils.astrbot_path import (
+    get_astrbot_plugin_data_path,
+    get_astrbot_temp_path,
+)
 
 
 class ConfigNode:
@@ -107,6 +110,7 @@ class PluginConfig(ConfigNode):
     recall_time: int
     desensitize: bool
     ai_analysis: AIAnalysisConfig
+    record_join_leave: bool
     mystery_url: str
     mystery_cookies: str
 
@@ -118,6 +122,7 @@ class PluginConfig(ConfigNode):
         self.admins_id: list[str] = context.get_config().get("admins_id", [])
         self.temp_dir = Path(get_astrbot_temp_path()) / self._plugin_name / "box_cards"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
         self._normalize_protect_ids()
 
     def _normalize_protect_ids(self):

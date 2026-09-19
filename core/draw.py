@@ -342,6 +342,8 @@ class CardMaker:
                 x += font.getlength(run)
 
     # ------------------------------------------------------------ rows
+    _EXTRA_LABELS = frozenset({"退群时间"})  # service-appended rows outside FIELD_LABELS
+
     @staticmethod
     def _parse_rows(lines: list[str]) -> list[list]:
         """Split display lines into [label, [value lines]] rows.
@@ -350,7 +352,7 @@ class CardMaker:
         start a row; everything else (library indents, wrapped signatures) is a
         continuation line of the previous row.
         """
-        labels = set(BoxUserProfile.FIELD_LABELS.values())
+        labels = set(BoxUserProfile.FIELD_LABELS.values()) | CardMaker._EXTRA_LABELS
         rows: list[list] = []
         for raw in lines:
             text = raw.strip()
@@ -611,17 +613,22 @@ class CardMaker:
         if level:
             level_lh = sum(level_font.getmetrics())
             level_y = title_y + (title_h - level_lh) / 2 + 2
-            self._draw_mixed(
-                img, draw, (text_x + self._measure(title, title_font) + 20, level_y),
-                level, level_font, (*TITLE_COLOR, 255),
+            lx = text_x + self._measure(title, title_font) + 22
+            # frosted white pill behind the badge: gold icons on the pink header are hard to read
+            pill_h = level_lh + 12
+            pill_w = self._measure(level, level_font) + 26
+            draw.rounded_rectangle(
+                [lx, level_y - 6, lx + pill_w, level_y - 6 + pill_h],
+                pill_h / 2,
+                fill=(255, 255, 255, 216),
             )
+            self._draw_mixed(img, draw, (lx + 13, level_y), level, level_font, (*TITLE_COLOR, 255))
 
         # QQ line
         sub_y = title_y + title_h + 8
         sub_font = self._font(SUBTITLE_SIZE)
         if qq:
             self._draw_mixed(img, draw, (text_x + 2, sub_y), f"QQ {qq}", sub_font, SUBTITLE_COLOR)
-
         # signature line(s)
         if sig:
             sig_font = self._font(SIGN_SIZE)
@@ -642,7 +649,6 @@ class CardMaker:
         # subtle decorations
         sdraw = ImageDraw.Draw(img)
         _sparkle(sdraw, ox + CARD_W - 92, oy + 50, 18, (255, 255, 255, 200))
-        _sparkle(sdraw, ox + CARD_W - 148, oy + 100, 12, (255, 243, 176, 210))
 
     _ANALYSIS_LABELS = (
         ("avatar", "头像印象 · AI"),
