@@ -204,37 +204,42 @@
     "llm_models": {
         "description": "模型配置（提供商选择）",
         "type": "object",
-        "hint": "填提供商 ID（AstrBot 里一个提供商绑定一个模型；可选列表见「成员数据」面板的「模型」页，也可在该页用下拉选择）。优先级：各功能自选 > 兜底模型 > 系统默认",
+        "hint": "优先级：各功能自选 > 兜底提供商 > 系统默认。下拉列出 AstrBot 已加载的对话模型提供商；也可在「成员数据」面板的「模型」页设置，两处数据互通",
         "items": {
             "fallback": {
                 "description": "兜底提供商",
                 "type": "string",
-                "hint": "各功能未单独指定时使用；留空用系统默认",
-                "default": ""
+                "hint": "从已加载的对话提供商中选择；留空逐级回落",
+                "default": "",
+                "_special": "select_provider"
             },
             "welcome": {
                 "description": "AI 欢迎语提供商",
                 "type": "string",
-                "hint": "留空用「兜底提供商」",
-                "default": ""
+                "hint": "从已加载的对话提供商中选择；留空逐级回落",
+                "default": "",
+                "_special": "select_provider"
             },
             "avatar": {
                 "description": "头像分析提供商",
                 "type": "string",
-                "hint": "留空用「兜底提供商」",
-                "default": ""
+                "hint": "从已加载的对话提供商中选择；留空逐级回落",
+                "default": "",
+                "_special": "select_provider"
             },
             "signature": {
                 "description": "签名解读提供商",
                 "type": "string",
-                "hint": "留空用「兜底提供商」",
-                "default": ""
+                "hint": "从已加载的对话提供商中选择；留空逐级回落",
+                "default": "",
+                "_special": "select_provider"
             },
             "overall": {
                 "description": "综合锐评提供商",
                 "type": "string",
-                "hint": "留空用「兜底提供商」",
-                "default": ""
+                "hint": "从已加载的对话提供商中选择；留空逐级回落",
+                "default": "",
+                "_special": "select_provider"
             }
         }
     },

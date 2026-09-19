@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.12.5
+
+配置弹窗的模型选择改用 AstrBot 原生提供商选择器。
+
+新功能：
+
+- `llm_models` 五个模型字段的配置项声明 `_special: "select_provider"`——AstrBot 配置弹窗会原生渲染 **ProviderSelector** 组件（列出所有已加载的对话模型提供商，不再是被吐槽的文本输入框），选中值即提供商 ID，与面板「模型」页下拉读写同一份配置。
+- 字段描述统一为「XX 提供商」，提示补充回落说明。
+- 依据（4.27.4 源码核对）：`dashboard/src/components/shared/ConfigItemRenderer.vue` 的 `_special === 'select_provider'` 分支排在所有类型判断**之前**，且嵌套 `type: "object"` 的子字段会经 `AstrBotConfig.vue` 递归后同样走 `ConfigItemRenderer`，所以嵌套对象内也能生效（参考插件 `astrbot_plugin_group_welcome` 即此写法）；`ProviderSelectMenu` 发出的是 `provider.id`，与本插件 `_norm_provider_id` / `get_provider_by_id` 口径一致；`config_service.py` 下发插件 schema 时直接透传 `config.schema`，不剥离 `_special`。
+
 ## v0.12.4
 
 Bug Fixes：
