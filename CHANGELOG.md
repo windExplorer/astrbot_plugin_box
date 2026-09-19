@@ -1,5 +1,9 @@
 # 更新日志
 
+## v0.12.1
+
+修复面板打开即报 `ReferenceError: activePage is not defined`：v0.12.0 重写页面时 `activePage` / `collapsed` 两个状态变量漏声明（模板与 return 均在引用）。已补上，并核对了 setup 返回的全部标识符声明齐全。
+
 ## v0.12.0
 
 成员数据面板全面升级：新增插件配置页，模型选择改按提供商。

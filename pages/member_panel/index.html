@@ -207,6 +207,8 @@
     setup: function () {
       var NS = naive;
       var isDark = ref(false);
+      var activePage = ref("overview");
+      var collapsed = ref(false);
       var theme = computed(function () { return isDark.value ? NS.darkTheme : null; });
       var themeOverrides = {
         common: { primaryColor: "#e0679c", primaryColorHover: "#eb8cb4", primaryColorPressed: "#d65492",
