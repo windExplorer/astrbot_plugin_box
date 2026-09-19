@@ -395,6 +395,27 @@ class BoxService:
             return result
 
     # ------------------------------------------------------------ 欢迎语
+    def _resolve_llm(self, site_model: str) -> tuple[Any, str | None]:
+        """解析 LLM 调用目标：站点模型 > 兜底模型 > 系统默认。
+
+        模型格式：``提供商ID/模型名``（跨提供商路由）或 ``模型名``（用系统默认提供商）。
+        返回 (provider, model_name)；model_name 为 None 时用该提供商的默认模型。
+        """
+        context = self.cfg.context
+        model = (site_model or "").strip()
+        if not model:
+            model = (self.cfg.llm_fallback_model or "").strip()
+        if not model:
+            return context.get_using_provider(), None
+        if "/" in model:
+            provider_id, _, model_name = model.partition("/")
+            provider = context.get_provider_by_id(provider_id)
+            if provider:
+                return provider, model_name or None
+            logger.warning(f"[资料卡] 未找到 LLM 提供商 {provider_id}，回退系统默认")
+            return context.get_using_provider(), model_name or None
+        return context.get_using_provider(), model
+
     async def _build_welcome(self, result: BoxResult) -> str:
         """Fill the welcome text for a join card (rendered inside the card).
 
@@ -424,7 +445,7 @@ class BoxService:
 
     async def _gen_welcome_ai(self, name: str, count_text: str = "") -> str:
         """Optional LLM-generated welcome line, with retries."""
-        provider = self.cfg.context.get_using_provider()
+        provider, model = self._resolve_llm(self.cfg.welcome_ai_model)
         if not provider:
             return ""
         prompt = (
@@ -438,7 +459,7 @@ class BoxService:
         retries = max(0, int(self.cfg.welcome_ai_retry or 0))
         for attempt in range(retries + 1):
             try:
-                resp = await provider.text_chat(prompt=prompt)
+                resp = await provider.text_chat(prompt=prompt, model=model)
                 return (resp.completion_text or "").strip()[:100]
             except Exception as e:
                 logger.debug(f"[资料卡] AI 欢迎语第 {attempt + 1}/{retries + 1} 次生成失败: {e}")
@@ -517,55 +538,52 @@ class BoxService:
         # 退群/被踢卡默认不调用 LLM，除非显式开启 event_analysis
         if card_type in ("leave", "kick") and not ai.event_analysis:
             return {}
-        enabled = {
-            "avatar": ai.avatar_analysis,
-            "signature": ai.signature_analysis,
-            "overall": ai.overall_analysis,
-        }
-        if not any(enabled.values()):
-            return {}
-        provider = self.cfg.context.get_using_provider()
-        if not provider:
-            return {}
-
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={target_id}&spec=640"
         signature = (profile.long_nick or "").strip()
         profile_text = "\n".join(display)
 
-        prompts: dict[str, tuple[str, bool]] = {}
-        if enabled["avatar"]:
-            prompts["avatar"] = (
-                "这是一位QQ用户的头像图片。请根据头像画面，用轻松幽默的语气写一句话点评这位用户，"
-                "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。",
-                True,
+        # (key, (provider, model), (prompt, with_image))
+        specs: list[tuple[str, tuple[Any, str | None], tuple[str, bool]]] = []
+        if ai.avatar_analysis:
+            specs.append(
+                ("avatar", self._resolve_llm(ai.avatar_model),
+                 ("这是一位QQ用户的头像图片。请根据头像画面，用轻松幽默的语气写一句话点评这位用户，"
+                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", True))
             )
-        if enabled["signature"] and signature:
-            prompts["signature"] = (
-                f"一位QQ用户的个性签名是：「{signature}」。请据此用轻松幽默的语气写一句话点评这位用户，"
-                "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。",
-                False,
+        if ai.signature_analysis and signature:
+            specs.append(
+                ("signature", self._resolve_llm(ai.signature_model),
+                 (f"一位QQ用户的个性签名是：「{signature}」。请据此用轻松幽默的语气写一句话点评这位用户，"
+                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", False))
             )
-        if enabled["overall"]:
-            prompts["overall"] = (
-                "这是一位QQ用户的头像图片和公开资料：\n"
-                f"{profile_text}\n"
-                "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"
-                "直接输出锐评内容，不要任何前缀、引号或解释。",
-                True,
+        if ai.overall_analysis:
+            specs.append(
+                ("overall", self._resolve_llm(ai.overall_model),
+                 ("这是一位QQ用户的头像图片和公开资料：\n"
+                  f"{profile_text}\n"
+                  "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"
+                  "直接输出锐评内容，不要任何前缀、引号或解释。", True))
             )
+        if not specs:
+            return {}
 
-        async def _run(key: str, prompt: str, with_image: bool) -> tuple[str, str]:
+        async def _run(key: str, provider_model: tuple, prompt_info: tuple[str, bool]) -> tuple[str, str]:
+            prompt, with_image = prompt_info
+            provider, model = provider_model
+            if not provider:
+                return key, ""
             try:
                 response = await provider.text_chat(
                     prompt=prompt,
                     image_urls=[avatar_url] if with_image else None,
+                    model=model,
                 )
                 return key, (response.completion_text or "").strip()[:80]
             except Exception as e:
                 logger.warning(f"llm analysis [{key}] failed: {e}")
                 return key, ""
 
-        pairs = await asyncio.gather(*(_run(k, p, img) for k, (p, img) in prompts.items()))
+        pairs = await asyncio.gather(*(_run(k, pm, pi) for k, pm, pi in specs))
         return {key: text for key, text in pairs if text}
 
     async def _get_avatar(self, user_id: str) -> bytes | None:

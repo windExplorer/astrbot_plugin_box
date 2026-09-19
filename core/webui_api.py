@@ -268,12 +268,49 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
         unrecorded = sum(1 for m in out if not m["info_recorded"] or not m["join_recorded"])
         return _ok({"group_id": gid, "total": len(out), "unrecorded": unrecorded, "members": out})
 
+    async def h_llm_models(*_args, **_kwargs) -> dict:
+        """枚举可用的 LLM 提供商与模型，供面板填写「提供商ID/模型名」时参考。"""
+        try:
+            insts = plugin.context.provider_manager.get_insts() or []
+        except Exception as e:
+            return _err(f"获取提供商失败: {e}")
+        using_id = ""
+        try:
+            using = plugin.context.get_using_provider()
+            using_id = using.meta().id if using else ""
+        except Exception:
+            using_id = ""
+        providers = []
+        for p in insts:
+            try:
+                if not hasattr(p, "text_chat"):
+                    continue
+                pid = str(p.provider_config.get("id") or "")
+                models = []
+                try:
+                    models = [str(m) for m in (await p.get_models()) or []]
+                except Exception:
+                    models = []
+                providers.append(
+                    {
+                        "id": pid,
+                        "type": str(p.provider_config.get("type") or ""),
+                        "current_model": str(p.get_model() or ""),
+                        "models": models,
+                    }
+                )
+            except Exception:
+                continue
+        providers.sort(key=lambda p: (p["id"] != using_id, p["id"]))
+        return _ok({"providers": providers, "using_id": using_id})
+
     routes = [
         ("/groups", h_groups, ["GET"]),
         ("/backfill/status", h_backfill_status, ["GET"]),
         ("/backfill", h_backfill_start, ["POST"]),
         ("/backfill/cancel", h_backfill_cancel, ["POST"]),
         ("/group/members", h_group_members, ["GET"]),
+        ("/llm/models", h_llm_models, ["GET"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

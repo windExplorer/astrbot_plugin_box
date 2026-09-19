@@ -90,6 +90,27 @@
             </n-card>
           </template>
 
+          <!-- ═══════════ 模型 ═══════════ -->
+          <template v-else-if="activePage === 'models'">
+            <n-card title="可用 LLM 模型" size="small">
+              <template #header-extra>
+                <n-button size="small" @click="loadModels()">🔄 刷新</n-button>
+              </template>
+              <n-space vertical size="large">
+                <n-text depth="3">
+                  各功能（头像分析 / 签名解读 / 综合锐评 / AI 欢迎语）的模型在<b>插件配置页</b>填写，格式
+                  <b>提供商ID/模型名</b>（如 openai/gpt-4o-mini）。优先级：各自模型 → 兜底模型（llm_fallback_model）→ 系统默认。
+                </n-text>
+                <n-data-table
+                  :columns="modelColumns"
+                  :data="llmProviders"
+                  :row-key="p => p.id"
+                  :loading="modelsLoading"
+                  size="small" />
+              </n-space>
+            </n-card>
+          </template>
+
           <!-- ═══════════ 预留扩展页 ═══════════ -->
           <template v-else>
             <n-card :title="menuLabel" size="small">
@@ -157,14 +178,48 @@
 
       var groupPagination = { pageSize: 10 };
       var memberPagination = { pageSize: 20 };
+      var llmProviders = ref([]);
+      var modelsLoading = ref(false);
+      var usingId = ref("");
       var filterOptions = [
         { label: "全部成员", value: "all" },
         { label: "仅看缺记录", value: "unrecorded" }
       ];
 
+      function loadModels() {
+        modelsLoading.value = true;
+        return bridge.apiGet("llm/models", { _t: Date.now() }).then(function (d) {
+          llmProviders.value = d.providers || [];
+          usingId.value = d.using_id || "";
+        }).catch(function (e) { window.__panelFail && window.__panelFail(e.message); })
+          .finally(function () { modelsLoading.value = false; });
+      }
+
+      var modelColumns = [
+        { title: "提供商 ID", key: "id", width: 180, render: function (p) {
+            var star = p.id === usingId.value ? " ★" : "";
+            return h("span", { style: "font-family:monospace" }, p.id + star);
+          } },
+        { title: "类型", key: "type", width: 140 },
+        { title: "当前模型", key: "current_model", width: 200, render: function (p) {
+            return h("span", { style: "font-family:monospace" }, p.current_model || "—");
+          } },
+        { title: "可用模型", key: "models", render: function (p) {
+            if (!p.models.length) return h("span", { class: "muted" }, "（接口未提供列表）");
+            return h(NS.NSpace, { size: 4 }, {
+              default: function () {
+                return p.models.slice(0, 12).map(function (m) {
+                  return h(NS.NTag, { size: "tiny", bordered: false }, { default: function () { return m; } });
+                });
+              }
+            });
+          } }
+      ];
+
       var menuOptions = [
         { label: "🏠 概览", key: "overview" },
-        { label: "👥 群数据", key: "groups" }
+        { label: "👥 群数据", key: "groups" },
+        { label: "🧠 模型", key: "models" }
         // 在此数组中追加 { label, key } 即可扩展新页面（配合下方模板分支）
       ];
       var menuLabel = computed(function () {
@@ -323,7 +378,10 @@
           } }
       ];
 
-      function onMenuUpdate(key) { activePage.value = key; }
+      function onMenuUpdate(key) {
+        activePage.value = key;
+        if (key === "models" && !llmProviders.value.length) loadModels();
+      }
 
       onMounted(function () {
         try {
@@ -350,7 +408,8 @@
         memberFilter: memberFilter, filterOptions: filterOptions,
         filteredMembers: filteredMembers, memberSummary: memberSummary,
         memberColumns: memberColumns, memberPagination: memberPagination,
-        memberLoading: memberLoading, currentGid: currentGid, loadMembers: loadMembers
+        memberLoading: memberLoading, currentGid: currentGid, loadMembers: loadMembers,
+        llmProviders: llmProviders, modelsLoading: modelsLoading, modelColumns: modelColumns
       };
     }
   };
