@@ -1,5 +1,19 @@
 # 更新日志
 
+## v0.12.11
+
+现象：卡片上的「最后发言」不是实时的最新一条消息时间，看起来有滞后。
+
+根因：`last_sent` 取自 `get_group_member_info` 返回的 `last_sent_time`，而本插件调用该接口时**没有带 `no_cache`**。aiocqhttp 系适配器（NapCat / LLO 等）对该接口默认回吐自身缓存——AstrBot 核心自己调用时也是显式传 `no_cache=False`（`aiocqhttp_platform_adapter.py:359`），所以群成员的发言时间要等适配器缓存刷新才更新，可滞后数小时。本地 SQLite 只缓存了群昵称/头衔/身份/等级（`member_info` 表无 `last_sent`），不是插件侧缓存造成的。
+
+Bug Fixes：
+
+- `get_group_member_info` 增加 `no_cache=True`，强制取实时值——与同一函数里既有的 `get_stranger_info(user_id, no_cache=True)` 保持一致；`astrbot_plugin_group_welcome` 也是这样传参的。
+
+> 另一个延迟来源（按设计，非缺陷）：`cache_cooldown`（默认 15 分钟）内重复查询会直接复用上次渲染好的卡片，其上的「最后发言」即上次取值。要求完全实时可把它设为 0；事件卡（入群/退群/被踢）不受冷却限制，始终实时获取。
+
+验证：`no_cache` 属该接口的正规参数（AstrBot 核心与参考插件均传），未知参数不会导致调用失败；`python -m compileall main.py core` 通过。实时性需在真机验证：让目标成员在群里发一条消息后立刻 `/资料卡 @他` 对比（本改动不触碰线上机器人，未做该实测）。
+
 ## v0.12.10
 
 「信息保护用户」不再被管理员名单污染。

@@ -131,8 +131,10 @@ class BoxService:
             stranger_info = {}
 
         try:
+            # no_cache：适配器默认会回吐自己的群成员缓存，last_sent_time（最后发言）
+            # 因此可能滞后数小时；与上面的 get_stranger_info 保持一致，强制取实时值
             member_info = await bot.get_group_member_info(
-                user_id=int(target_id), group_id=int(group_id)
+                user_id=int(target_id), group_id=int(group_id), no_cache=True
             )
         except Exception:
             member_info = {}
