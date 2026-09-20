@@ -1,5 +1,27 @@
 # 更新日志
 
+## v0.12.10
+
+「信息保护用户」不再被管理员名单污染。
+
+问题：`PluginConfig._normalize_protect_ids` 在每次启动时把 AstrBot 的 `admins_id` 追加进 `protect_ids` 并写盘，导致面板与配置弹窗的「信息保护用户」里出现用户从未填写的 QQ 号；且旧代码用 `admin_id not in self.protect_ids` 判重，当配置里存的是数字 ID、`admins_id` 是字符串时判不相等，会**每次启动重复追加**。
+
+改动：
+
+- 新增 `PluginConfig.protected_ids` 属性：读取时取 `protect_ids ∪ admins_id` 并统一 `str().strip()`，`main.py` 的三处判定（@名单过滤、查询拦截、自动展示跳过）全部改用它。保护语义不变——管理员仍默认受保护、仍可查询自己，与 schema 里那句提示一致。
+- `_normalize_protect_ids` → `_strip_admin_ids`：改为一次性**清掉**存档里被旧版自动并入的管理员 ID（保留用户手填项）并写盘；无管理员或无需清理时不写盘。因为保护改到读取侧，清掉不改变任何行为。
+- `_get_ats` / `utils.get_ats` 的 `block_ids` 注解从 `list[str]` 放宽为 `Iterable[str]`（现在传的是 set）。
+
+验证（本机 Miniconda Python 3.12，用桩 `astrbot` 模块直接加载 `core/config.py` 跑断言，17 项全通过）：
+
+- 干净存档：`protect_ids` 保持 `[]`（不被污染），`protected_ids == {111, 222}`，且未触发写盘。
+- 旧版污染存档 `["111", "333", 222, "111"]`：清理后剩 `["333"]`（连旧版重复追加的项一并去重），`protected_ids == {111, 222, 333}`，写盘一次；数字 ID `333` 能正常命中。
+- 无管理员：存档原样保留、不写盘。
+- 回归覆盖：`friendly_duration` 输出 `400天5时30分` / `1天2时3分`（秒被 `parts[:3]` 截断）/ `45秒` / `不到 1 秒`；头像形状描边半径 `None / 34 / 0`，未知值回落圆形。
+- `python -m compileall main.py core` 通过。
+
+> 升级后首次启动会自动清理存档里的管理员 ID，日志会打一行「已从 protect_ids 清掉 N 个自动并入的管理员 ID」。
+
 ## v0.12.9
 
 新增配置项「头像形状」；过程中挖出面板配置页两个互相掩盖的渲染缺陷，一并修掉。

@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Iterable
 from datetime import date
 
 import aiohttp
@@ -26,7 +27,7 @@ async def get_avatar(user_id: str) -> bytes | None:
 def get_ats(
     event: AiocqhttpMessageEvent,
     noself: bool = False,
-    block_ids: list[str] | None = None,
+    block_ids: Iterable[str] | None = None,
 ):
     """获取被at者们的id列表(@增强版)"""
     ats = {str(seg.qq) for seg in event.get_messages()[1:] if isinstance(seg, At)}

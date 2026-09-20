@@ -150,7 +150,18 @@ class PluginConfig(ConfigNode):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
         self._fill_schema_defaults()
-        self._normalize_protect_ids()
+        self._strip_admin_ids()
+
+    @property
+    def protected_ids(self) -> set[str]:
+        """实际生效的保护名单：手动配置 ∪ Bot 管理员。
+
+        管理员不写进 protect_ids（历史版本会并表写盘，导致面板里冒出
+        用户没填过的 QQ 号），改为在读取时取并集；统一成 str 也顺手修掉
+        配置里存数字 ID 时 `target_id in protect_ids` 判不等的问题。
+        """
+        ids = list(self.protect_ids or []) + list(self.admins_id or [])
+        return {str(x).strip() for x in ids if str(x).strip()}
 
     def _fill_schema_defaults(self) -> None:
         """旧版本保存的配置可能缺少新增键（AstrBot 不一定合并）：按 _conf_schema.json 的 default 补齐。
@@ -190,13 +201,24 @@ class PluginConfig(ConfigNode):
             except Exception:
                 pass
 
-    def _normalize_protect_ids(self):
-        if not self.admins_id:
+    def _strip_admin_ids(self):
+        """一次性清掉旧版自动并入 protect_ids 的管理员 ID。
+
+        保护语义不变（管理员仍受保护，见 protected_ids）；清掉后配置里
+        只剩用户自己填的 QQ 号，面板回显也不再有多余条目。
+        """
+        admins = {str(x).strip() for x in self.admins_id or []}
+        if not admins:
             return
-        for admin_id in self.admins_id:
-            if admin_id not in self.protect_ids:
-                self.protect_ids.append(admin_id)
-        self.save_config()
+        current = list(self.protect_ids or [])
+        kept = [x for x in current if str(x).strip() not in admins]
+        if len(kept) != len(current):
+            self.protect_ids = kept
+            self.save_config()
+            logger.info(
+                f"[config:{self.__class__.__name__}] 已从 protect_ids 清掉 "
+                f"{len(current) - len(kept)} 个自动并入的管理员 ID"
+            )
 
     @property
     def library_switch(self) -> bool:

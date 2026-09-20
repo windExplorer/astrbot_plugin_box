@@ -1,5 +1,6 @@
 import asyncio
 import weakref
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from aiocqhttp import CQHttp
@@ -148,7 +149,7 @@ class BoxPlugin(Star):
         if self.cfg.only_admin and not event.is_admin() and input_id:
             return
 
-        target_ids = self._get_ats(event, self.cfg.protect_ids) or [
+        target_ids = self._get_ats(event, self.cfg.protected_ids) or [
             event.get_sender_id()
         ]
 
@@ -192,7 +193,7 @@ class BoxPlugin(Star):
         ):
             return "Box query failed: only admins can query other users."
 
-        if target_id in self.cfg.protect_ids and target_id != event.get_sender_id():
+        if target_id in self.cfg.protected_ids and target_id != event.get_sender_id():
             return "Box query failed: this user is protected."
 
         group_id = event.get_group_id() or "0"
@@ -269,7 +270,7 @@ class BoxPlugin(Star):
         elif group_id in (self.cfg.black_groups or []):
             return
 
-        if user_id in self.cfg.protect_ids or user_id == event.get_self_id():
+        if user_id in self.cfg.protected_ids or user_id == event.get_self_id():
             return
 
         result = await self.box.fetch_card(
@@ -347,7 +348,7 @@ class BoxPlugin(Star):
     def _get_ats(
         self,
         event: AiocqhttpMessageEvent,
-        block_ids: list[str] | None = None,
+        block_ids: Iterable[str] | None = None,
     ) -> list[str]:
         ats = {str(seg.qq) for seg in event.get_messages()[1:] if isinstance(seg, At)}
         for arg in event.message_str.split():
