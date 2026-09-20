@@ -121,6 +121,7 @@ class PluginConfig(ConfigNode):
     display_options: list[str]
     recall_time: int
     desensitize: bool
+    avatar_shape: str
     ai_analysis: AIAnalysisConfig
     record_join_leave: bool
     init_backfill: bool

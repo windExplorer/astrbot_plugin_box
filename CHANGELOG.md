@@ -1,5 +1,27 @@
 # 更新日志
 
+## v0.12.9
+
+新增配置项「头像形状」；过程中挖出面板配置页两个互相掩盖的渲染缺陷，一并修掉。
+
+新功能：
+
+- `_conf_schema.json` 新增顶层键 `avatar_shape`，`options` 为「圆形 / 圆角方形 / 直角方形」，默认「圆形」——AstrBot 配置弹窗原生渲染成下拉；「成员数据」面板「基础」分区同步加了同款下拉。
+- 渲染分支：`core/draw.py` 的 `AVATAR_SHAPES` 把配置文案映射成头像圆角半径（`None`=圆形蒙版、`24`=圆角方形、`0`=直角方形），新增 `_paint_avatar_shape()` 供白色描边与蒙版共用。描边半径按同心偏置取 `corner + AVATAR_RING`，而直角（`0`）偏置后仍是直角——否则头像尖角会戳出圆角描边。未知值 / 空值一律回落圆形。
+- 按 AGENTS §八.3 三处同步：`core/config.py` 字段声明、`core/webui_api.py` 的 `_CONFIG_FIELDS` 白名单、面板 `CONFIG_SECTIONS`；`profile` / `draw` / `config` / `service` / `webui_api` 均已在 `main.py` 热重载列表内，无需再动。
+
+Bug Fixes：
+
+- 修复面板「插件配置」页 4 个字段长期不渲染：展示字段选项、欢迎语模板、AI 欢迎语提示词、群规文本。根因是 in-DOM 模板里 `<n-select ... />` 这类**自闭合自定义元素**——HTML 解析器不会对未知元素自闭合，标签保持打开，把后面的兄弟分支吞成自己的子节点；被吞的分支只有在其父 `n-select`（`f.type === 'tags'` / `'multiselect'`）命中时才渲染，所以对 textarea / multiselect 类型永远不成立 → 整块消失。这是 v0.12.3 修 `v-if` 链之后残留的第二层原因。已全部改为显式闭合标签。
+- 修复 `n-select` 选项列表空白：naive-ui 的 `options` 只接受 `{label, value}`，传纯字符串数组会渲染出无文本的选项（实测 `.n-base-select-option__content` 内只有两个注释节点、`textContent` 为空）。新增 `toChoices()` 归一化，「头像形状」与「展示字段选项」共用。
+
+验证（真实浏览器 + 桩 bridge，走 AGENTS §八.7 的冒烟流程）：
+
+- 修复前：26 个字段中 4 个控件为空（`missing` 列表），`textarea` 节点数 0；形状下拉打开后 3 个选项文本全为空。
+- 修复后：`missing` 为空、`textarea` 节点数 3；头像形状下拉正确列出「圆形 / 圆角方形 / 直角方形」，展示字段选项列出「QQ号 / UID / …」；配置值 `圆角方形` 正确回显，点「保存「基础」」实测 payload 为 `{"avatar_shape": "圆角方形", ...}` 等 9 个真实值。
+
+> 卡片像素未能本地渲染（本机无可用 Python/PIL），三种形状需生成一张卡确认。
+
 ## v0.12.8
 
 现象：普通卡的「加群时间」行，后缀末尾的「）」被挤到第二行。

@@ -37,6 +37,7 @@ _CONFIG_FIELDS = {
     "cache_cooldown": "int",
     "max_concurrent": "int",
     "desensitize": "bool",
+    "avatar_shape": "str",
     "recall_time": "int",
     "welcome_enabled": "bool",
     "welcome_text": "str",

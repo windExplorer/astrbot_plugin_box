@@ -112,15 +112,18 @@
                     <n-select v-if="f.type === 'tags'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                               filterable tag multiple :options="[]"
-                              :placeholder="f.placeholder || '输入后回车添加'" />
+                              :placeholder="f.placeholder || '输入后回车添加'"></n-select>
                     <n-select v-if="f.type === 'multiselect'"
                               :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
-                              multiple :options="displayFieldOptions" />
+                              multiple :options="toChoices(displayFieldOptions)"></n-select>
+                    <n-select v-if="f.type === 'choice'"
+                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
+                              :options="toChoices(f.options)" style="width:220px"></n-select>
                     <n-input v-if="f.type === 'textarea'"
                              :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"
                              type="textarea" :rows="3"></n-input>
                     <n-input v-else
-                             :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)" />
+                             :value="cfgGet(f.key)" @update:value="v => cfgSet(f.key, v)"></n-input>
                     <div class="muted" v-if="f.hint">{{ f.hint }}</div>
                   </div>
                   <n-button type="primary" size="small" :loading="savingSection === sec.key"
@@ -252,6 +255,7 @@
           { key: "only_admin", type: "switch", label: "仅 Bot 管理员可查询他人资料" },
           { key: "protect_ids", type: "tags", label: "信息保护用户", placeholder: "输入 QQ 号后回车添加", hint: "查询时会忽略名单中的用户；管理员默认受保护" },
           { key: "desensitize", type: "switch", label: "信息脱敏" },
+          { key: "avatar_shape", type: "choice", label: "头像形状", options: ["圆形", "圆角方形", "直角方形"], hint: "默认圆形；卡片里的白色描边会跟随形状" },
           { key: "record_join_leave", type: "switch", label: "记录入群/退群精确时间（本地数据库）" },
           { key: "init_backfill", type: "switch", label: "启动时自动回填成员资料（12 小时内不重复）" },
           { key: "cache_cooldown", type: "number", label: "资料卡缓存冷却（分钟，0 = 关闭）", min: 0, max: 720 },
@@ -421,6 +425,13 @@
         node[parts[parts.length - 1]] = v;
       }
 
+      function toChoices(list) {
+        // n-select 只认 {label, value}，传纯字符串会渲染出空白选项
+        return (list || []).map(function (o) {
+          return typeof o === "string" ? { label: o, value: o } : o;
+        });
+      }
+
       function saveSection(sec) {
         var values = {};
         sec.fields.forEach(function (f) { values[f.key] = cfgGet(f.key); });
@@ -540,6 +551,7 @@
         providerOptions: providerOptions, saveModels: saveModels, loadModels: loadModels,
         configSections: CONFIG_SECTIONS, configData: configData,
         cfgGet: cfgGet, cfgSet: cfgSet, saveSection: saveSection, savingSection: savingSection,
+        toChoices: toChoices,
         displayFieldOptions: displayFieldOptions
       };
     }

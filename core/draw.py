@@ -57,6 +57,19 @@ CARD_W = 1040
 PAD = 56
 AVATAR_D = 216
 AVATAR_RING = 10
+# 配置项「头像形状」→ 头像圆角半径；None 走圆形蒙版，未知值同样回落圆形
+AVATAR_SHAPES: dict[str, int | None] = {"圆形": None, "圆角方形": 24, "直角方形": 0}
+
+
+def _paint_avatar_shape(canvas, box: list, radius: int | None, fill) -> None:
+    """按形状画头像外形（描边与蒙版共用）：None=圆形、0=直角方形、>0=圆角方形。"""
+    if radius is None:
+        canvas.ellipse(box, fill=fill)
+    elif radius:
+        canvas.rounded_rectangle(box, radius=radius, fill=fill)
+    else:
+        canvas.rectangle(box, fill=fill)
+
 RADIUS = 48
 FOOTER_H = 74
 ROW_PAD_X = 26
@@ -408,6 +421,7 @@ class CardMaker:
         card_type: str = "",
         welcome_text: str = "",
         welcome_image: bytes | None = None,
+        avatar_shape: str = "圆形",
     ) -> bytes:
         """Create a profile card PNG.
 
@@ -421,6 +435,7 @@ class CardMaker:
             card_type: "" / "join" / "leave" / "kick" — draws the header corner chip.
             welcome_text: Optional welcome message rendered inside join cards.
             welcome_image: Optional pool image embedded inside join cards.
+            avatar_shape: 头像形状，取自 AVATAR_SHAPES 的键；未知值按圆形渲染。
 
         Returns:
             Rendered PNG bytes.
@@ -474,7 +489,10 @@ class CardMaker:
 
         draw = ImageDraw.Draw(img)
         avatar_img = self._load_avatar(avatar)
-        self._paint_header_content(img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h, card_type)
+        self._paint_header_content(
+            img, draw, ox, oy, avatar_img, title, qq, level, sig, header_h,
+            card_type, avatar_shape,
+        )
 
         y = oy + header_h + BODY_TOP_PAD
         if welcome_text:
@@ -699,14 +717,21 @@ class CardMaker:
         sig: str,
         header_h: int,
         card_type: str = "",
+        avatar_shape: str = "圆形",
     ) -> None:
         # avatar with white ring, vertically centered
         ax = ox + PAD + AVATAR_D / 2
         ay = oy + header_h / 2
         ring_r = AVATAR_D / 2 + AVATAR_RING
-        draw.ellipse([ax - ring_r, ay - ring_r, ax + ring_r, ay + ring_r], fill=(255, 255, 255, 240))
+        corner = AVATAR_SHAPES.get(avatar_shape)
+        # 外扩描边与头像外形同心：圆角半径同步 +AVATAR_RING，直角（0）偏置后仍是直角
+        ring_corner = corner + AVATAR_RING if corner else corner
+        ring_box = [ax - ring_r, ay - ring_r, ax + ring_r, ay + ring_r]
+        _paint_avatar_shape(draw, ring_box, ring_corner, (255, 255, 255, 240))
         mask = Image.new("L", (AVATAR_D, AVATAR_D), 0)
-        ImageDraw.Draw(mask).ellipse([0, 0, AVATAR_D - 1, AVATAR_D - 1], fill=255)
+        _paint_avatar_shape(
+            ImageDraw.Draw(mask), [0, 0, AVATAR_D - 1, AVATAR_D - 1], corner, 255
+        )
         img.paste(avatar_img, (int(ax - AVATAR_D / 2), int(ay - AVATAR_D / 2)), mask)
 
         text_x = ox + PAD + AVATAR_D + 52

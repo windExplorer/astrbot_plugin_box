@@ -324,6 +324,7 @@ class BoxService:
             result.card_type,
             result.welcome_text,
             result.welcome_image,
+            avatar_shape=self.cfg.avatar_shape,
         )
         return result.image
 
