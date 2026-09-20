@@ -24,7 +24,11 @@ def join_duration_suffix(join_time: Any) -> str:
 def friendly_duration(delta: Any) -> str:
     """Friendly duration: start from the largest non-zero unit down to seconds.
 
-    Examples: 5分3秒 -> "5分钟3秒"; 2天0时0分3秒 -> "2天3秒"; 871天 -> "871天".
+    单位一律单字（天/时/分/秒）：加群时间行要在 32px 字号下和
+    「2025-03-18 09:41:22」这样的时间戳同排，写「小时/分钟」会把
+    后缀的「）」挤到第二行。
+
+    Examples: 5分3秒 -> "5分3秒"; 2天0时0分3秒 -> "2天3秒"; 871天 -> "871天".
     """
     try:
         total = int(delta.total_seconds())
@@ -39,9 +43,9 @@ def friendly_duration(delta: Any) -> str:
     if days:
         parts.append(f"{days}天")
     if hours:
-        parts.append(f"{hours}小时")
+        parts.append(f"{hours}时")
     if minutes:
-        parts.append(f"{minutes}分钟")
+        parts.append(f"{minutes}分")
     if seconds:
         parts.append(f"{seconds}秒")
     return "".join(parts[:3]) or "不到 1 秒"
