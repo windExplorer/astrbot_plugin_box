@@ -386,6 +386,27 @@ class BoxService:
         except Exception as e:
             logger.warning(f"[资料卡] 写入卡片缓存失败: {e}")
 
+    async def _refresh_cached_rank(self, bot: CQHttp, cached: BoxResult) -> BoxResult:
+        """冷却期命中缓存时，只把「第 N 位 · 共 M 人」按实时名册重算。
+
+        群成员增减不该等到冷却期结束才反映在卡片上。资料接口与 LLM 分析仍沿用
+        缓存值（不额外花 token）；排位没变化时直接复用原图，只有名册真的动过才
+        在本地重绘一次。
+        """
+        if not cached.group_id:
+            return cached
+        rank, pos, total = await self._get_join_rank(bot, cached.group_id, cached.target_id)
+        if not rank or rank == cached.join_rank:
+            return cached
+        old = (cached.join_rank, cached.join_pos, cached.join_total)
+        cached.join_rank, cached.join_pos, cached.join_total = rank, pos, total
+        try:
+            await self.render_box_image(cached)
+        except Exception as e:
+            logger.warning(f"[资料卡] 缓存卡片重绘失败，沿用原图与旧排位: {e}")
+            cached.join_rank, cached.join_pos, cached.join_total = old
+        return cached
+
     async def fetch_card(
         self,
         bot: CQHttp,
@@ -402,13 +423,13 @@ class BoxService:
         if card_type == "":
             cached = self._cache_lookup(group_id, target_id)
             if cached:
-                return cached
+                return await self._refresh_cached_rank(bot, cached)
         async with self._semaphore:
             if card_type == "":
                 # 排队期间其他任务可能已刷新过同一目标，再查一次
                 cached = self._cache_lookup(group_id, target_id)
                 if cached:
-                    return cached
+                    return await self._refresh_cached_rank(bot, cached)
             result = await self.get_box_info(
                 bot,
                 target_id,
@@ -526,26 +547,51 @@ class BoxService:
     async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> tuple[str, int, int]:
         """Compute the member's join order within the group.
 
+        名册以适配器实时成员列表为底，再用本地事件记录校正两处偏差：适配器可能
+        仍在回吐自身缓存（刚进群的人不在列表里 → 总数漏计），也可能还留着已知
+        已退群/被踢的成员（→ 总数重复计入）。
+
         Returns (display_text, position, total); text is "" when unavailable.
         """
-        try:
-            members = await bot.get_group_member_list(group_id=int(group_id))
-        except Exception as e:
-            logger.warning(f"get_group_member_list failed: {e}")
-            return "", 0, 0
+        members: list = []
+        for extra in ({"no_cache": True}, {}):
+            try:
+                members = await bot.get_group_member_list(group_id=int(group_id), **extra)
+                break
+            except Exception as e:
+                if extra:
+                    logger.debug(f"[资料卡] 群成员列表不支持 no_cache，退回默认取数: {e}")
+                    continue
+                logger.warning(f"get_group_member_list failed: {e}")
+                return "", 0, 0
 
-        joined = []
-        for m in members:
+        try:
+            departed = self.store.departed_joins_for_group(group_id)
+        except Exception:
+            departed = {}
+        roster: dict[str, int] = {}
+        for m in members or []:
             try:
                 join_time = int(m.get("join_time") or 0)
             except (TypeError, ValueError):
                 continue
             if join_time > 0:
-                joined.append((join_time, str(m.get("user_id"))))
+                roster[str(m.get("user_id"))] = join_time
+        for uid in departed:
+            roster.pop(uid, None)
+        # 事件里见过、但适配器列表还没收录的新成员：按本地精确入群时间补进名册
+        for uid, jt in self.store.join_times_for_group(group_id).items():
+            if uid in roster or uid in departed or not jt:
+                continue
+            try:
+                roster[uid] = int(datetime.strptime(jt, "%Y-%m-%d %H:%M:%S").timestamp())
+            except ValueError:
+                continue
+
+        joined = sorted((ts, uid) for uid, ts in roster.items())
         if not joined:
             return "", 0, 0
 
-        joined.sort()
         for idx, (_t, uid) in enumerate(joined, start=1):
             if uid == target_id:
                 return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
@@ -559,7 +605,6 @@ class BoxService:
         if record and record[0]:
             try:
                 join_dt = datetime.strptime(record[0], "%Y-%m-%d %H:%M:%S")
-                departed = self.store.departed_joins_for_group(group_id)
                 before = sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
                 for uid, jt in departed.items():
                     if uid == target_id or not jt:
