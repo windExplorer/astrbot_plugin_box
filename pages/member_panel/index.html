@@ -355,15 +355,19 @@
       }
 
       function pollOnce() {
-        return bridge.apiGet("backfill/status").then(function (st) {
+        return bridge.apiGet("backfill/status", { _t: Date.now() }).then(function (st) {
           var wasRunning = backfill.value.running;
           backfill.value = st;
-          if (wasRunning && !st.running) {
+          if (st.running) { schedulePoll(); return; }
+          if (wasRunning) {
             refresh();
             if (drawerShow.value && currentGid.value) loadMembers(currentGid.value);
           }
-          if (st.running) schedulePoll();
-        }).catch(function () {});
+        }).catch(function () {
+          // 回填期间接口繁忙，单次取状态失败很常见；这里断掉链条会让进度从此不再
+          // 自动更新（表现为"卡住，要刷新页面才动"），所以失败也要继续排下一次
+          schedulePoll();
+        });
       }
       var pollScheduled = false;
       function schedulePoll() {
@@ -521,7 +525,10 @@
       }
 
       onMounted(function () {
-        refresh();
+        // 任务可能是上一次页面里启动的：打开面板时若仍在跑，就把轮询接上
+        refresh().then(function () {
+          if (backfill.value.running) schedulePoll();
+        });
         try {
           var ctx = window.AstrBotPluginPage && window.AstrBotPluginPage.getContext &&
                     window.AstrBotPluginPage.getContext();
