@@ -86,7 +86,7 @@ ANALYSIS_SIZE = 28
 FOOTER_SIZE = 24
 HEADER_TOP_PAD = 42
 BODY_TOP_PAD = 26
-BODY_BOTTOM_PAD = 26
+BODY_BOTTOM_PAD = 34
 
 
 def _mix(a: tuple, b: tuple, t: float) -> tuple:
@@ -454,11 +454,15 @@ class CardMaker:
             body_h += ROW_GAP * (len(body) - 1)
 
         analysis_h = sum(self._analysis_block_height(text) for _label, text in blocks)
-        if len(blocks) > 1:
-            analysis_h += ROW_GAP * (len(blocks) - 1)
+        if blocks:
+            # 绘制时每个块之后都紧跟一个 ROW_GAP（含最后一块），预留必须按块数算，
+            # 否则差额会把 BODY_BOTTOM_PAD 吃光，最后一行直接压在 footer 上
+            analysis_h += ROW_GAP * len(blocks)
 
         welcome_img, welcome_img_h = self._fit_welcome_image(welcome_image)
-        welcome_h = self._welcome_height(welcome_text, welcome_img_h) if welcome_text else 0
+        welcome_h = 0
+        if welcome_text:
+            welcome_h = self._welcome_height(welcome_text, welcome_img_h) + ROW_GAP
 
         header_h = self._header_height(title, level, sig, card_type)
         card_h = header_h + welcome_h + analysis_h + body_h + FOOTER_H
