@@ -413,13 +413,26 @@ class BoxUserProfile:
                         return []
                 return []
             case "last_sent":
-                if self.last_sent:
-                    try:
-                        sent_text = datetime.fromtimestamp(int(self.last_sent)).strftime("%Y-%m-%d %H:%M")
-                        return [f"{label}：{sent_text}"]
-                    except (TypeError, ValueError, OSError, OverflowError):
-                        return []
-                return []
+                if self.last_sent is None or self.last_sent == "":
+                    return []  # 适配器没给这个字段，不知道发言情况
+                try:
+                    sent_ts = int(self.last_sent)
+                except (TypeError, ValueError):
+                    return []
+                join_ts = 0
+                try:
+                    join_ts = int(self.join_time or 0)
+                except (TypeError, ValueError):
+                    join_ts = 0
+                # 从未发言的成员，NapCat/NTQQ 会把成员记录的创建时间（=入群时间）
+                # 当作 last_sent_time 回填；发言不可能早于入群，这类值一律视为未发言
+                if sent_ts <= 0 or (join_ts and sent_ts <= join_ts):
+                    return [f"{label}：未发言"]
+                try:
+                    sent_text = datetime.fromtimestamp(sent_ts).strftime("%Y-%m-%d %H:%M")
+                    return [f"{label}：{sent_text}"]
+                except (TypeError, ValueError, OSError, OverflowError):
+                    return []
             case "qqLevel":
                 if self.hide_qq_level:
                     return [f"{label}：隐藏"]
