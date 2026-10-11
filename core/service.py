@@ -19,6 +19,10 @@ from .store import MemberStore
 # 新成员在此窗口内仍算在群；更早的记录视为幽灵（退群事件漏收），不计入总数。
 PRESENCE_GRACE_SECONDS = 3600
 
+# 新朋友卡（入群卡）固定补充显示的字段：新人的第一印象卡，就算「信息显示选项」里
+# 没勾也一并展示；字段本身没数据时不会占行（_format_field 会跳过空值）。
+JOIN_CARD_EXTRA_FIELDS = ("sex", "birthday", "age")
+
 library_display_options = [
     "names",
     "nicknames",
@@ -127,6 +131,10 @@ class BoxService:
             Box query result.
         """
         display_options = list(self.cfg.display_options)
+        if card_type == "join":
+            # 新朋友卡（入群卡）固定补上性别/生日/年龄：这是新人的第一印象卡，
+            # 且这三项最依赖「陌生人与成员两个接口」的数据，见 _join_card_extras
+            display_options.extend(self._join_card_extras(display_options))
         try:
             stranger_info = await bot.get_stranger_info(
                 user_id=int(target_id), no_cache=True
@@ -411,6 +419,18 @@ class BoxService:
             cached.join_rank, cached.join_pos, cached.join_total = old
         return cached
 
+    @staticmethod
+    def _join_card_extras(display_options: list[str]) -> list[str]:
+        """入群卡要额外补的字段（配置里已勾过的跳过，键名与中文标签都算勾过）。"""
+        enabled = set(display_options)
+        extras: list[str] = []
+        for key in JOIN_CARD_EXTRA_FIELDS:
+            label = BoxUserProfile.FIELD_LABELS.get(key, "")
+            if key in enabled or (label and label in enabled):
+                continue
+            extras.append(key)
+        return extras
+
     async def fetch_card(
         self,
         bot: CQHttp,
@@ -560,6 +580,10 @@ class BoxService:
         反过来，本地有退群记录的人也不再强行从实时名册里剔除：既然这次列表里还有
         他，就说明他确实在群里（可能是重新入群而没观测到事件），误剔会导致永久少算。
 
+        **所有卡片的排位/人数口径统一为同一份名册**：还在群的按名册本身算；已经不在
+        名册里的（退群/被踢）就把本人加回去算，即「还没把他减掉」的那份名册——
+        退群卡与在群卡因此只差他本人一位，不再出现两张卡人数对不上的情况。
+
         Returns (display_text, position, total); text is "" when unavailable.
         """
         members: list = []
@@ -607,50 +631,22 @@ class BoxService:
                 # 在群成员：排位与总数都只针对「现在还在群里的人」——
                 # 第 N 位（现有成员中的加入次序）· 共 M 人（当前实际在群人数）
                 return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
-        # 目标已不在群里（退群/被踢）：排位按「历史加入次序」算（含已知离群者），
-        # 总数取其**离群那一刻的群规模**——当时已经入群、且那时还没走的人（含他自己），
-        # 而不是「现有 + 所有历史离群者」：后者会随时间无限膨胀（群一年换一半人，
-        # 卡片就会显示「共 上千人」）。退群时刻没记录到时退回当前在群规模。
-        gone = {uid: jt for uid, (jt, _lt) in departed.items() if uid not in roster}
+        # 目标不在名册里（刚退群/被踢，或早已离群）：
+        # 统一按「还没把他减掉的那份名册」算 —— 把本人加回去，
+        #   人数 M = 当前名册人数 + 1（退群通知到达时群列表往往还没减掉他，与在群卡只差 1）
+        #   排位 N = 名册中入群早于他的人 + 1（也就是他若还在，会排在现有成员的第 N 位）
+        # 不再做「离群那一刻的群规模」这类历史重建：那需要一份可信的历史名册，
+        # 而本地记录只增不减，重建出来的数字只会越用越大。
         try:
             record = self.store.get(group_id, target_id)
         except Exception:
             record = None
-        if record and record[0]:
-            try:
-                join_dt = datetime.strptime(record[0], "%Y-%m-%d %H:%M:%S")
-                before = sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
-                for uid, jt in gone.items():
-                    if uid == target_id or not jt:
-                        continue
-                    joined_at = self._parse_dt(jt)
-                    if joined_at is not None and joined_at < join_dt:
-                        before += 1
-                pos = 1 + before
-
-                ref_dt = self._parse_dt(record[1])
-                if ref_dt is None:
-                    total = len(joined) + len(gone)
-                else:
-                    present_at_leave = sum(
-                        1 for t, _u in joined if datetime.fromtimestamp(t) < ref_dt
-                    )
-                    gone_at_leave = 0
-                    for uid, jt in gone.items():
-                        if uid == target_id or not jt:
-                            continue
-                        joined_at = self._parse_dt(jt)
-                        if joined_at is None or joined_at >= ref_dt:
-                            continue
-                        left_at = self._parse_dt(departed.get(uid, ("", ""))[1])
-                        if left_at is not None and left_at < ref_dt:
-                            continue  # 比目标还早离群：目标离群时他已经不在了
-                        gone_at_leave += 1
-                    total = present_at_leave + gone_at_leave + 1  # +1 是目标本人
-                return f"第 {pos} 位 · 共 {total} 人", pos, max(total, pos)
-            except ValueError:
-                pass
-        return "", 0, 0
+        join_dt = self._parse_dt(record[0]) if record else None
+        if join_dt is None:
+            return "", 0, 0
+        pos = 1 + sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
+        total = len(joined) + 1
+        return f"第 {pos} 位 · 共 {total} 人", pos, total
 
     @staticmethod
     def _parse_dt(text: str) -> datetime | None:

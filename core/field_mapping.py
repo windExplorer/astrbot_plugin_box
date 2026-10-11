@@ -21,8 +21,7 @@ FIELD_MAPPING: list[dict[str, Any]] = [
     {
         "key": "sex",
         "label": "性别",
-        "source": "info1",
-        "transform": lambda v: {"male": "男", "female": "女"}.get(v),
+        "source": "computed",  # 陌生人/群成员两个接口都可能给，归一化逻辑在 BoxUserProfile
     },
     {"key": "birthday", "label": "生日", "source": "computed"},
     {"key": "constellation", "label": "星座", "source": "computed"},
@@ -116,10 +115,8 @@ FIELD_MAPPING: list[dict[str, Any]] = [
     {
         "key": "reg_time",
         "label": "注册时间",
-        "source": "info1",
-        "transform": lambda v: datetime.fromtimestamp(v).strftime("%Y年")
-        if v
-        else None,
+        # 真值来自适配器扩展字段；拿不到时按 QQ 号号段估算（见 BoxUserProfile.reg_time_text）
+        "source": "computed",
     },
     {
         "key": "long_nick",

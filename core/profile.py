@@ -8,6 +8,171 @@ from typing import Any, ClassVar
 
 from zhdate import ZhDate
 
+from astrbot.api import logger
+
+
+# QQ 号位数 → 注册年代。腾讯从未公开号段归属，这是社区通行的粗略推算，
+# 一律在卡片上标注「按号段估算」；适配器真给了 reg_time 时优先用真值。
+_QQ_ERA_BY_LENGTH: dict[int, str] = {
+    1: "1998~1999年",
+    2: "1998~1999年",
+    3: "1998~1999年",
+    4: "1998~1999年",
+    5: "1998~1999年",
+    6: "1999~2000年",
+    7: "2000~2002年",
+    8: "2002~2005年",
+    9: "2005~2009年",
+    10: "2009~2012年",
+}
+_QQ_ERA_FALLBACK = "2013年以后"
+
+_YEAR_RE = re.compile(r"(1[6-9]\d{2}|20\d{2})")
+
+
+def estimate_qq_reg_era(qq: Any) -> str:
+    """按 QQ 号位数粗略推算注册年代；不是纯数字或无法判断时返回空串。"""
+    text = str(qq or "").strip()
+    if not text.isdigit():
+        return ""
+    return _QQ_ERA_BY_LENGTH.get(len(text), _QQ_ERA_FALLBACK)
+
+
+def parse_epoch(value: Any) -> int:
+    """把适配器给的时间戳/日期文本统一成 Unix 秒，失败返回 0。
+
+    兼容秒级与毫秒级时间戳（数字或数字字符串）、以及 "2008-06-01" / "2008年" /
+    "2008/6/1" 这类日期文本（只取年份，注册时间本来也只显示年份）。
+    """
+    if value is None:
+        return 0
+    text = str(value).strip()
+    if not text:
+        return 0
+    if text.isdigit():
+        try:
+            num = int(text)
+        except ValueError:
+            return 0
+        if num > 10_000_000_000:  # 毫秒级（13 位）
+            num //= 1000
+        return num if num > 0 else 0
+    matched = _YEAR_RE.search(text)
+    if not matched:
+        return 0
+    try:
+        return int(datetime(int(matched.group(1)), 1, 1).timestamp())
+    except (ValueError, OSError, OverflowError):
+        return 0
+
+
+def normalize_sex(value: Any) -> str:
+    """归一化性别的各种写法；字段缺失（None/空）返回 ""。
+
+    OneBot 用 male/female/unknown，部分适配器用 1/2/0 或中文，
+    显式的「unknown」会保留下来，卡片上显示成「保密」而不是留空。
+    """
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    if text in ("male", "m", "1", "男", "true"):
+        return "male"
+    if text in ("female", "f", "2", "女"):
+        return "female"
+    return "unknown"
+
+
+def _to_int(value: Any) -> int | None:
+    """宽松转 int：None / 空 / 非数字（适配器脏数据）一律返回 None。"""
+    if value is None or value == "":
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_int(source: dict[str, Any], keys: tuple[str, ...]) -> int:
+    for key in keys:
+        num = _to_int(source.get(key))
+        if num:
+            return num
+    return 0
+
+
+def _split_birthday(value: Any) -> tuple[int, int, int]:
+    """把 "1998-05-20" / "05-20" / "1998年5月20日" / "19980520" 拆成 (年,月,日)。
+
+    时间戳（10/13 位纯数字）在这里一律视为无效，避免把注册时间当成生日。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return (0, 0, 0)
+    if text.isdigit():
+        if len(text) == 8:  # YYYYMMDD
+            return (int(text[:4]), int(text[4:6]), int(text[6:]))
+        return (0, 0, 0)
+    nums = [int(n) for n in re.findall(r"\d+", text)]
+    if len(nums) >= 3:
+        return (nums[0], nums[1], nums[2])
+    if len(nums) == 2:
+        return (0, nums[0], nums[1])
+    return (0, 0, 0)
+
+
+def _valid_birthday(year: Any, month: Any, day: Any) -> tuple[int, int, int]:
+    """校验并规范化生日三元组；不合法的分量按 0（未知）处理。"""
+
+    def _num(value: Any) -> int:
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return 0
+
+    y, m, d = _num(year), _num(month), _num(day)
+    if not (1900 <= y <= 2100):
+        y = 0
+    if not (1 <= m <= 12):
+        m = 0
+    if not (1 <= d <= 31):
+        d = 0
+    if (m and not d) or (d and not m):
+        return (y, 0, 0)
+    return (y, m, d)
+
+
+def parse_birthday(*sources: dict[str, Any]) -> tuple[int, int, int]:
+    """从各个数据源里尽力解析生日 (年,月,日)，缺项为 0。
+
+    不同适配器的字段名差得很远（birthday_year / birthday_y / birth_year，
+    或干脆一个 "birthday": "1998-05-20" 字符串），逐个试过再用。
+    """
+    for source in sources:
+        if not isinstance(source, dict) or not source:
+            continue
+        year = _first_int(source, ("birthday_year", "birth_year", "birthday_y", "birthYear"))
+        month = _first_int(source, ("birthday_month", "birth_month", "birthday_m", "birthMonth"))
+        day = _first_int(source, ("birthday_day", "birth_day", "birthday_d", "birthDay"))
+        if not (year or month or day):
+            raw = source.get("birthday")
+            if raw is None:
+                raw = source.get("birth") or source.get("birthdate")
+            year, month, day = _split_birthday(raw)
+        if year or month or day:
+            return _valid_birthday(year, month, day)
+    return (0, 0, 0)
+
+
+def age_from_birthday(year: int, month: int, day: int) -> int:
+    """由完整生日推算年龄（QQ 的年龄本来就是从生日算的）；缺项返回 0。"""
+    if not (year and month and day):
+        return 0
+    today = date.today()
+    age = today.year - year - ((today.month, today.day) < (month, day))
+    return age if 0 < age < 130 else 0
+
 
 def join_duration_suffix(join_time: Any) -> str:
     """Human-readable "已入群 <时长>" suffix; empty on bad/missing input."""
@@ -180,6 +345,15 @@ class BoxUserProfile:
         member = member_info or {}
         library = library_info or {}
 
+        # 性别/年龄：陌生人接口经常给不全（尤其对刚进群的人），群成员接口
+        # （OneBot 规范里 get_group_member_info 同样返回 sex/age）拿来兜底
+        sex = normalize_sex(stranger.get("sex")) or normalize_sex(member.get("sex"))
+        age = _first_int(stranger, ("age",)) or _first_int(member, ("age",))
+        birth_year, birth_month, birth_day = parse_birthday(stranger, library)
+        if not age:
+            # QQ 的年龄本来就是从生日算出来的；接口没给年龄时自己算
+            age = age_from_birthday(birth_year, birth_month, birth_day) or None
+
         return cls(
             user_id=str(stranger.get("user_id") or ""),
             uid=str(stranger.get("uid") or ""),
@@ -189,11 +363,11 @@ class BoxUserProfile:
             card=str(member.get("card") or ""),
             title=str(member.get("title") or ""),
             role=str(member.get("role") or ""),
-            sex=str(stranger.get("sex") or ""),
-            birthday_year=stranger.get("birthday_year"),
-            birthday_month=stranger.get("birthday_month"),
-            birthday_day=stranger.get("birthday_day"),
-            age=stranger.get("age"),
+            sex=sex,
+            birthday_year=birth_year or None,
+            birthday_month=birth_month or None,
+            birthday_day=birth_day or None,
+            age=age,
             blood_type=stranger.get("kBloodType"),
             phone_number=str(stranger.get("phoneNum") or ""),
             email=str(stranger.get("eMail") or ""),
@@ -215,7 +389,7 @@ class BoxUserProfile:
             join_time=member.get("join_time"),
             last_sent=member.get("last_sent_time"),
             qq_level=cls._pick_qq_level(stranger),
-            reg_time=stranger.get("reg_time"),
+            reg_time=cls._pick_reg_time(stranger, library),
             login_days=stranger.get("login_days"),
             hide_qq_level=bool(stranger.get("isHideQQLevel")),
             hide_privilege_icon=bool(stranger.get("isHidePrivilegeIcon")),
@@ -248,6 +422,24 @@ class BoxUserProfile:
                     return value
             except (TypeError, ValueError):
                 continue
+        return None
+
+    @staticmethod
+    def _pick_reg_time(*sources: dict[str, Any]) -> int | None:
+        """注册时间：兼容秒/毫秒时间戳与日期文本，统一成 Unix 秒。
+
+        适配器（NapCat 等）与资料库接口的字段名不统一，逐个试；都没有则返回 None，
+        届时卡片上会退回「按 QQ 号号段估算」的显示（见 reg_time_text）。
+        """
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for key in ("reg_time", "regTime", "register_time", "registerTime", "create_time"):
+                if key not in source:
+                    continue
+                ts = parse_epoch(source.get(key))
+                if ts:
+                    return ts
         return None
 
     @classmethod
@@ -290,21 +482,56 @@ class BoxUserProfile:
         for key, label in self.FIELD_LABELS.items():
             if key not in enabled_options and label not in enabled_options:
                 continue
-            lines.extend(self._format_field(key, label, desensitize))
+            try:
+                lines.extend(self._format_field(key, label, desensitize))
+            except Exception as e:
+                # 单个字段碰上适配器脏数据（非数字的时间戳、畸形字符串等）不该
+                # 让整张卡片渲染失败：跳过这一行，只留日志
+                logger.debug(f"[资料卡] 字段 {key} 格式化失败，已跳过: {e}")
         return lines
 
     @property
+    def birthday_parts(self) -> tuple[int, int, int]:
+        """(年, 月, 日)；未知的分量为 0（适配器只给年月、或只给月日都能用）。"""
+        return _valid_birthday(self.birthday_year, self.birthday_month, self.birthday_day)
+
+    @property
     def birthday(self) -> date | None:
-        try:
-            if self.birthday_year and self.birthday_month and self.birthday_day:
-                return date(
-                    int(self.birthday_year),
-                    int(self.birthday_month),
-                    int(self.birthday_day),
-                )
-        except (TypeError, ValueError):
-            return None
+        year, month, day = self.birthday_parts
+        if year and month and day:
+            try:
+                return date(year, month, day)
+            except ValueError:
+                return None
         return None
+
+    @property
+    def birthday_text(self) -> str:
+        """生日文本：年月日齐全 → 1998-05-20，只有月日 → 05-20，只有年 → 1998年。"""
+        year, month, day = self.birthday_parts
+        if month and day:
+            return f"{year:04d}-{month:02d}-{day:02d}" if year else f"{month:02d}-{day:02d}"
+        return f"{year}年" if year else ""
+
+    @property
+    def reg_time_text(self) -> str:
+        """注册时间文本：适配器真值优先，拿不到时按 QQ 号号段估算（会标注「估算」）。
+
+        QQ 官方没有开放「注册时间」接口，能拿到的只有适配器扩展字段；拿不到就用
+        号段推算一个年代区间，总比整行消失强——但必须让用户看出这是估的。
+        """
+        if self.reg_time:
+            ts = parse_epoch(self.reg_time)
+            if ts:
+                try:
+                    return datetime.fromtimestamp(ts).strftime("%Y年")
+                except (ValueError, OSError, OverflowError):
+                    pass
+            matched = _YEAR_RE.search(str(self.reg_time))
+            if matched:
+                return f"{matched.group(1)}年"
+        era = estimate_qq_reg_era(self.user_id)
+        return f"{era}（按号段估算）" if era else ""
 
     def _format_field(
         self,
@@ -312,7 +539,7 @@ class BoxUserProfile:
         label: str,
         desensitize: bool = False,
     ) -> list[str]:
-        birthday = self.birthday
+        birth_year, birth_month, birth_day = self.birthday_parts
 
         match key:
             case "user_id":
@@ -333,29 +560,33 @@ class BoxUserProfile:
                 text = {"owner": "群主", "admin": "管理员", "member": "成员"}.get(self.role)
                 return [f"{label}：{text}"] if text else []
             case "sex":
-                text = {"male": "男", "female": "女"}.get(self.sex)
+                # unknown = 账号隐藏了性别（接口明确说了，不是我们没拿到）
+                text = {"male": "男", "female": "女", "unknown": "保密"}.get(self.sex)
                 return [f"{label}：{text}"] if text else []
             case "birthday":
-                return [f"{label}：{birthday:%Y-%m-%d}"] if birthday else []
+                text = self.birthday_text
+                return [f"{label}：{text}"] if text else []
             case "constellation":
-                if birthday:
-                    return [
-                        f"{label}："
-                        f"{self._get_constellation(birthday.month, birthday.day)}"
-                    ]
+                if birth_month and birth_day:
+                    return [f"{label}：{self._get_constellation(birth_month, birth_day)}"]
                 return []
             case "zodiac":
-                if birthday:
+                # 生肖要年份，接口只给月日时算不了
+                if birth_year and birth_month and birth_day:
                     return [
-                        f"{label}："
-                        f"{self._get_zodiac(birthday.year, birthday.month, birthday.day)}"
+                        f"{label}：{self._get_zodiac(birth_year, birth_month, birth_day)}"
                     ]
                 return []
             case "age":
-                return [f"{label}：{self.age}岁"] if self.age else []
+                try:
+                    age_value = int(self.age)
+                except (TypeError, ValueError):
+                    return []
+                return [f"{label}：{age_value}岁"] if age_value > 0 else []
             case "kBloodType":
-                if self.blood_type:
-                    return [f"{label}：{self._get_blood_type(int(self.blood_type))}"]
+                blood = _to_int(self.blood_type)
+                if blood:
+                    return [f"{label}：{self._get_blood_type(blood)}"]
                 return []
             case "phoneNum":
                 if self.phone_number and self.phone_number != "-":
@@ -378,8 +609,9 @@ class BoxUserProfile:
             case "pos":
                 return [f"{label}：{self.pos}"] if self.pos else []
             case "makeFriendCareer":
-                if self.career and self.career != "0":
-                    return [f"{label}：{self._get_career(int(self.career))}"]
+                career = _to_int(self.career)
+                if career:
+                    return [f"{label}：{self._get_career(career)}"]
                 return []
             case "labels":
                 return [f"{label}：{self.labels}"] if self.labels else []
@@ -392,9 +624,8 @@ class BoxUserProfile:
             case "is_years_vip":
                 return [f"{label}：已开"] if self.is_years_vip else []
             case "vip_level":
-                if self.vip_level and int(self.vip_level) != 0:
-                    return [f"{label}：{self.vip_level}"]
-                return []
+                vip = _to_int(self.vip_level)
+                return [f"{label}：{vip}"] if vip else []
             case "like_count":
                 return [f"{label}：{self.like_count}"] if self.like_count else []
             case "level":
@@ -436,20 +667,19 @@ class BoxUserProfile:
             case "qqLevel":
                 if self.hide_qq_level:
                     return [f"{label}：隐藏"]
-                if self.qq_level:
-                    return [f"{label}：{self._format_qq_level(int(self.qq_level))}"]
+                level = _to_int(self.qq_level)
+                if level:
+                    return [f"{label}：{self._format_qq_level(level)}"]
                 return []
             case "reg_time":
-                if self.reg_time:
-                    return [
-                        f"{label}："
-                        f"{datetime.fromtimestamp(int(self.reg_time)).strftime('%Y年')}"
-                    ]
-                return []
+                text = self.reg_time_text
+                return [f"{label}：{text}"] if text else []
             case "login_days":
-                if self.login_days and int(self.login_days) != 0:
-                    return [f"{label}：{self.login_days}天"]
-                return []
+                try:
+                    days = int(self.login_days)
+                except (TypeError, ValueError):
+                    return []
+                return [f"{label}：{days}天"] if days > 0 else []
             case "isHidePrivilegeIcon":
                 return [f"{label}：隐藏"] if self.hide_privilege_icon else []
             case "isBlock":
