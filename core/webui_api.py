@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
@@ -53,6 +55,7 @@ _CONFIG_FIELDS = {
     "welcome_private_rules": "bool",
     "group_rules": "str",
     "black_groups": "strlist",
+    "show_reg_time": "bool",
     "display_options": "strlist",
     "autobox.enter": "bool",
     "autobox.exit": "bool",
@@ -526,6 +529,36 @@ def register_apis(plugin, backfiller: MemberBackfiller, refresher: GroupRefreshe
         logger.info(f"[资料卡] 模型选择已更新: {plugin.box.get_model_selection()}")
         return _ok({"selection": plugin.box.get_model_selection()})
 
+    async def h_info(*_args, **_kwargs) -> dict:
+        """面板头部信息：插件版本 + 可选展示字段（单一来源 = 仓库里的配置文件）。
+
+        「信息显示选项」的候选字段以前在前端硬编码了一份，改 schema 后两边容易对不上，
+        这里直接从 _conf_schema.json 读出来发给面板。
+        """
+        root = Path(__file__).resolve().parent.parent
+        version = ""
+        fields: list[str] = []
+        try:
+            raw = (root / "metadata.yaml").read_text(encoding="utf-8")
+            matched = re.search(r"(?m)^\s*version:\s*v?([0-9][^\s#]*)", raw)
+            version = matched.group(1) if matched else ""
+        except Exception as e:
+            logger.debug(f"[资料卡] 读取插件版本失败: {e}")
+        try:
+            schema = json.loads((root / "_conf_schema.json").read_text(encoding="utf-8"))
+            item = schema.get("display_options")
+            if isinstance(item, dict):
+                fields = [str(x) for x in item.get("options") or []]
+        except Exception as e:
+            logger.debug(f"[资料卡] 读取展示字段清单失败: {e}")
+        return _ok(
+            {
+                "version": version,
+                "display_fields": fields,
+                "show_reg_time": bool(plugin.cfg.show_reg_time),
+            }
+        )
+
     # ------------------------------------------------------ 插件配置读写
     async def h_config_get(*_args, **_kwargs) -> dict:
         raw = plugin.cfg._data
@@ -569,6 +602,7 @@ def register_apis(plugin, backfiller: MemberBackfiller, refresher: GroupRefreshe
         return _ok({"changed": changed})
 
     routes = [
+        ("/info", h_info, ["GET"]),
         ("/groups", h_groups, ["GET"]),
         ("/backfill/status", h_backfill_status, ["GET"]),
         ("/backfill", h_backfill_start, ["POST"]),

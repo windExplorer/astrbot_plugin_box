@@ -159,6 +159,15 @@ class BoxService:
             Box query result.
         """
         display_options = list(self.cfg.display_options)
+        # 注册时间由独立开关控制（已从「信息显示选项」列表里摘出来，免得两个入口打架）：
+        # 开着就注入，关着就把残留项一并剔掉——开关必须是说了算的那一个
+        if self.cfg.show_reg_time:
+            if "reg_time" not in display_options and "注册时间" not in display_options:
+                display_options.append("reg_time")
+        else:
+            display_options = [
+                opt for opt in display_options if opt not in ("reg_time", "注册时间")
+            ]
         if card_type == "join":
             # 新朋友卡（入群卡）固定补上性别/生日/年龄：这是新人的第一印象卡，
             # 且这三项最依赖「陌生人与成员两个接口」的数据，见 _join_card_extras

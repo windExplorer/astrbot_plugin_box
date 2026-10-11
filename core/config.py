@@ -118,6 +118,7 @@ class PluginConfig(ConfigNode):
     only_admin: bool
     protect_ids: list[str]
     autobox: AutoBoxConfig
+    show_reg_time: bool
     display_options: list[str]
     recall_time: int
     desensitize: bool
@@ -149,8 +150,36 @@ class PluginConfig(ConfigNode):
         self.temp_dir = Path(get_astrbot_temp_path()) / self._plugin_name / "box_cards"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
+        self._migrate_reg_time_switch()
         self._fill_schema_defaults()
         self._strip_admin_ids()
+
+    def _migrate_reg_time_switch(self) -> None:
+        """v0.12.20：注册时间从「信息显示选项」独立成开关 ``show_reg_time``。
+
+        老存档只能靠 ``display_options`` 里有没有「注册时间」判断用户想要什么：
+        有 → 开关开；没有 → 开关关（尊重之前的选择）。判断完就把该项从列表里摘掉，
+        免得同一件事有两个入口。全新安装时 ``display_options`` 还不存在，这里直接
+        返回，交给 ``_fill_schema_defaults`` 用 schema 默认值（开）。
+
+        迁移后必须立刻落盘：否则下次启动时列表里已经没有「注册时间」，会被误判成
+        「用户把它关掉了」。
+        """
+        if "show_reg_time" in self._data:
+            return
+        options = self._data.get("display_options")
+        if not isinstance(options, list):
+            return
+        self._data["show_reg_time"] = "注册时间" in options
+        self._data["display_options"] = [item for item in options if item != "注册时间"]
+        logger.info(
+            f"[config:{self.__class__.__name__}] 「注册时间」已迁移为独立开关 "
+            f"show_reg_time={self._data['show_reg_time']}"
+        )
+        try:
+            self.save_config()
+        except Exception as e:
+            logger.warning(f"[config:{self.__class__.__name__}] 迁移注册时间开关后落盘失败: {e}")
 
     @property
     def protected_ids(self) -> set[str]:
