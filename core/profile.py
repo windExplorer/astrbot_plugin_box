@@ -29,6 +29,69 @@ _QQ_ERA_FALLBACK = "2013年以后"
 
 _YEAR_RE = re.compile(r"(1[6-9]\d{2}|20\d{2})")
 
+# 注册时间可能出现的字段名（适配器 / 第三方资料接口各不相同，逐个试）
+REG_TIME_KEYS = (
+    "reg_time",
+    "regTime",
+    "register_time",
+    "registerTime",
+    "register_date",
+    "registerDate",
+    "reg_date",
+    "regDate",
+    "create_time",
+    "createTime",
+    "create_date",
+    "createDate",
+)
+
+# 生日可能出现的字段名
+BIRTHDAY_KEYS = (
+    "birthday",
+    "birth",
+    "birthday_info",
+    "birth_info",
+    "birthdate",
+    "birth_date",
+)
+
+# 适配器可能把资料包一层再返回（get_px 的 parse_qq_birthday 也做了同样的兼容）
+_NESTED_INFO_KEYS = (
+    "data",
+    "baseInfo",
+    "base_info",
+    "simpleInfo",
+    "simple_info",
+    "detail",
+    "profile",
+    "userInfo",
+    "user_info",
+)
+
+
+def flatten_info(source: Any, _depth: int = 0) -> dict[str, Any]:
+    """把适配器嵌在 data / baseInfo / simpleInfo / detail 里的字段并到顶层。
+
+    不同适配器（以及它们不同版本）对 get_stranger_info 的包装方式不一样：有的
+    直接平铺，有的塞进 ``{"data": {...}}`` 或 ``{"baseInfo": {...}}``。顶层字段优先，
+    只并标量值（避免把整个子字典当成字段值）。
+    """
+    if not isinstance(source, dict) or _depth > 3:
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in source.items():
+        # 已知的包装层（data/baseInfo/…）只并它内部的标量字段，本身不留下；
+        # 其它键原样保留——包括 {"month": 5, "day": 20} 这种字典形态的生日值
+        if isinstance(value, dict) and key in _NESTED_INFO_KEYS:
+            continue
+        out[key] = value
+    for key in _NESTED_INFO_KEYS:
+        nested = source.get(key)
+        if isinstance(nested, dict):
+            for sub_key, sub_value in flatten_info(nested, _depth + 1).items():
+                out.setdefault(sub_key, sub_value)
+    return out
+
 
 def estimate_qq_reg_era(qq: Any) -> str:
     """按 QQ 号位数粗略推算注册年代；不是纯数字或无法判断时返回空串。"""
@@ -103,16 +166,26 @@ def _first_int(source: dict[str, Any], keys: tuple[str, ...]) -> int:
 
 
 def _split_birthday(value: Any) -> tuple[int, int, int]:
-    """把 "1998-05-20" / "05-20" / "1998年5月20日" / "19980520" 拆成 (年,月,日)。
+    """把各种写法的生日拆成 (年, 月, 日)。
 
-    时间戳（10/13 位纯数字）在这里一律视为无效，避免把注册时间当成生日。
+    支持 ``"1998-05-20"`` / ``"05-20"`` / ``"0520"`` / ``"19980520"`` /
+    ``"1998年5月20日"`` / ``{"month": 5, "day": 20}``。
+    时间戳（10/13 位纯数字）一律视为无效，避免把注册时间当成生日。
     """
+    if isinstance(value, dict):
+        return (
+            _first_int(value, ("year", "birthday_year", "birth_year")),
+            _first_int(value, ("month", "birthday_month", "birth_month")),
+            _first_int(value, ("day", "birthday_day", "birth_day")),
+        )
     text = str(value or "").strip()
     if not text:
         return (0, 0, 0)
     if text.isdigit():
         if len(text) == 8:  # YYYYMMDD
             return (int(text[:4]), int(text[4:6]), int(text[6:]))
+        if len(text) == 4:  # MMDD
+            return (0, int(text[:2]), int(text[2:]))
         return (0, 0, 0)
     nums = [int(n) for n in re.findall(r"\d+", text)]
     if len(nums) >= 3:
@@ -156,10 +229,10 @@ def parse_birthday(*sources: dict[str, Any]) -> tuple[int, int, int]:
         month = _first_int(source, ("birthday_month", "birth_month", "birthday_m", "birthMonth"))
         day = _first_int(source, ("birthday_day", "birth_day", "birthday_d", "birthDay"))
         if not (year or month or day):
-            raw = source.get("birthday")
-            if raw is None:
-                raw = source.get("birth") or source.get("birthdate")
-            year, month, day = _split_birthday(raw)
+            for key in BIRTHDAY_KEYS:
+                if key in source:
+                    year, month, day = _split_birthday(source.get(key))
+                    break
         if year or month or day:
             return _valid_birthday(year, month, day)
     return (0, 0, 0)
@@ -341,9 +414,11 @@ class BoxUserProfile:
         Returns:
             User profile model.
         """
-        stranger = stranger_info or {}
-        member = member_info or {}
-        library = library_info or {}
+        # 不同适配器/版本对返回结构不一样：有的平铺，有的把资料塞在 data/baseInfo
+        # 之类子字典里。先展平一层，后面所有字段取值就都能拿到（生日/注册时间尤其依赖它）
+        stranger = flatten_info(stranger_info)
+        member = flatten_info(member_info)
+        library = flatten_info(library_info)
 
         # 性别/年龄：陌生人接口经常给不全（尤其对刚进群的人），群成员接口
         # （OneBot 规范里 get_group_member_info 同样返回 sex/age）拿来兜底
@@ -389,7 +464,7 @@ class BoxUserProfile:
             join_time=member.get("join_time"),
             last_sent=member.get("last_sent_time"),
             qq_level=cls._pick_qq_level(stranger),
-            reg_time=cls._pick_reg_time(stranger, library),
+            reg_time=cls._pick_reg_time(stranger, member, library),
             login_days=stranger.get("login_days"),
             hide_qq_level=bool(stranger.get("isHideQQLevel")),
             hide_privilege_icon=bool(stranger.get("isHidePrivilegeIcon")),
@@ -434,7 +509,7 @@ class BoxUserProfile:
         for source in sources:
             if not isinstance(source, dict):
                 continue
-            for key in ("reg_time", "regTime", "register_time", "registerTime", "create_time"):
+            for key in REG_TIME_KEYS:
                 if key not in source:
                     continue
                 ts = parse_epoch(source.get(key))

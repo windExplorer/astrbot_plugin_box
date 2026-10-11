@@ -12,12 +12,40 @@ from astrbot.api import logger
 
 from .config import PluginConfig
 from .draw import CardMaker
-from .profile import BoxUserProfile, friendly_duration, join_duration_suffix
+from .profile import (
+    BIRTHDAY_KEYS,
+    REG_TIME_KEYS,
+    BoxUserProfile,
+    flatten_info,
+    friendly_duration,
+    join_duration_suffix,
+)
 from .store import MemberStore
 
 # 入群排位的「名册宽限窗口」：适配器成员列表可能滞后，事件里见过但列表还没收录的
 # 新成员在此窗口内仍算在群；更早的记录视为幽灵（退群事件漏收），不计入总数。
 PRESENCE_GRACE_SECONDS = 3600
+
+# 注册时间/生日在 QQ 官方接口里都没有，只能指望适配器扩展字段；两者都拿不到时
+# 打一次字段清单（只打一次，别每次出卡都刷日志），方便用户确认适配器到底给了什么。
+_PROFILE_SOURCE_HINTED = False
+
+
+def _hint_missing_profile_source(stranger_info: dict, member_info: dict) -> None:
+    global _PROFILE_SOURCE_HINTED
+    if _PROFILE_SOURCE_HINTED:
+        return
+    _PROFILE_SOURCE_HINTED = True
+    merged = flatten_info(stranger_info)
+    merged.update(flatten_info(member_info))
+    keys = {str(k).lower() for k in merged}
+    if keys & {k.lower() for k in REG_TIME_KEYS} or keys & {k.lower() for k in BIRTHDAY_KEYS}:
+        return
+    logger.info(
+        "[资料卡] 适配器未返回注册时间/生日字段（QQ 官方无此接口，卡片上的注册时间"
+        "是按 QQ 号号段估算的）。本次 get_stranger_info/get_group_member_info 返回字段："
+        f"{sorted(merged.keys())}"
+    )
 
 # 新朋友卡（入群卡）固定补充显示的字段：新人的第一印象卡，就算「信息显示选项」里
 # 没勾也一并展示；字段本身没数据时不会占行（_format_field 会跳过空值）。
@@ -150,6 +178,9 @@ class BoxService:
             )
         except Exception:
             member_info = {}
+
+        # 注册时间/生日拿不到时提示一次（见 _hint_missing_profile_source）
+        _hint_missing_profile_source(stranger_info, member_info)
 
         library_info = {}
         if include_library and self.cfg.library_switch:
