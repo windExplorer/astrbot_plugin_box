@@ -1,6 +1,6 @@
 """成员数据面板的 Web API 与回填任务。
 
-路由前缀 ``/astrbot_plugin_box``（AstrBot 约定：带插件名），前端通过
+路由前缀 ``/astrbot_plugin_moe_box``（AstrBot 约定：带插件名），前端通过
 ``window.AstrBotPluginPage.apiGet/apiPost`` 调用，Dashboard 转发。
 
 返回信封遵循 AstrBot 桥接约定：
@@ -33,7 +33,7 @@ try:  # quart 是 AstrBot 的运行期依赖
 except Exception:  # pragma: no cover
     request = None  # type: ignore
 
-ROUTE_PREFIX = "/astrbot_plugin_box"
+ROUTE_PREFIX = "/astrbot_plugin_moe_box"
 
 # 面板可读写的插件配置键白名单（键 -> 类型）
 _CONFIG_FIELDS = {

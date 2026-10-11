@@ -4,7 +4,7 @@
 
 # 萌萌资料卡
 
-_✨ astrbot_plugin_box · QQ 资料卡片插件 ✨_
+_✨ astrbot_plugin_moe_box · QQ 资料卡片插件 ✨_
 
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -22,7 +22,11 @@ _✨ astrbot_plugin_box · QQ 资料卡片插件 ✨_
 
 ## 📦 安装
 
-在 AstrBot 的插件面板上通过链接安装：[https://github.com/windExplorer/astrbot_plugin_box](https://github.com/windExplorer/astrbot_plugin_box)
+在 AstrBot 的插件面板上通过链接安装：[https://github.com/windExplorer/astrbot_plugin_moe_box](https://github.com/windExplorer/astrbot_plugin_moe_box)
+
+> 由 `astrbot_plugin_box` 改名而来：首次启动会自动把旧插件的数据目录（`data/plugin_data/astrbot_plugin_box`）
+> 与配置文件（`data/config/astrbot_plugin_box_config.json`）搬过来，旧文件保留不动；确认新插件正常后，
+> 再卸载旧插件即可（卸载时不要勾选删除数据/配置也不影响）。
 
 ## ⌨️ 使用说明
 

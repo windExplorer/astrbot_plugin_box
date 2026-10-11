@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from types import MappingProxyType, UnionType
@@ -141,7 +142,8 @@ class PluginConfig(ConfigNode):
     mystery_url: str
     mystery_cookies: str
 
-    _plugin_name: str = "astrbot_plugin_box"
+    _plugin_name: str = "astrbot_plugin_moe_box"
+    _old_plugin_name: str = "astrbot_plugin_box"
 
     def __init__(self, cfg: AstrBotConfig, context: Context):
         super().__init__(cfg)
@@ -150,9 +152,61 @@ class PluginConfig(ConfigNode):
         self.temp_dir = Path(get_astrbot_temp_path()) / self._plugin_name / "box_cards"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
+        self._migrate_renamed_plugin()
         self._migrate_reg_time_switch()
         self._fill_schema_defaults()
         self._strip_admin_ids()
+
+    def _migrate_renamed_plugin(self) -> None:
+        """v0.12.22：插件从 ``astrbot_plugin_box`` 改名为 ``astrbot_plugin_moe_box``。
+
+        AstrBot 用「目录名 / 插件名」当身份，改名后等于一个全新插件：
+        - 配置文件是 ``data/config/<插件名>_config.json``，新文件里只有 schema 默认值；
+        - 数据目录是 ``data/plugin_data/<插件名>``，本地库（入群时间/名册/卡片缓存）会被孤立。
+
+        两者都做一次性搬迁，**旧文件保留不动**（便于回退，也便于之后卸载旧插件）：
+        - 数据目录：新目录不存在而旧目录存在 → 整目录复制（含 member_times.db 与 -wal/-shm）；
+        - 配置：仅当 AstrBot 这次刚创建新配置（``first_deploy``，内容还是 schema 默认值）
+          且旧配置文件存在时，把旧值整体搬进来。之后每次启动 ``first_deploy`` 都是 False，
+          不会把用户新改的配置覆盖回去。
+        """
+        # —— 数据目录 ——
+        old_data = self.data_dir.parent / self._old_plugin_name
+        if old_data.is_dir() and not self.data_dir.exists():
+            try:
+                shutil.copytree(old_data, self.data_dir)
+                logger.info(
+                    f"[config:{self.__class__.__name__}] 插件改名迁移：数据目录 "
+                    f"{old_data} → {self.data_dir}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[config:{self.__class__.__name__}] 数据目录迁移失败（沿用旧目录）: {e}"
+                )
+
+        # —— 配置文件 ——
+        try:
+            config_path = str(getattr(self._data, "config_path", "") or "")
+            if not config_path:
+                return
+            # first_deploy=True 表示 AstrBot 这次刚按 schema 默认值创建了新配置文件，
+            # 里面还没有任何用户数据——这正是搬迁旧配置的安全时机。
+            old_cfg = Path(config_path).parent / f"{self._old_plugin_name}_config.json"
+            if not (bool(getattr(self._data, "first_deploy", False)) and old_cfg.is_file()):
+                return
+            old_values = json.loads(old_cfg.read_text(encoding="utf-8-sig"))
+            if not isinstance(old_values, dict) or not old_values:
+                return
+            self._data.update(old_values)
+            self.save_config()
+            logger.info(
+                f"[config:{self.__class__.__name__}] 插件改名迁移：已从 {old_cfg.name} "
+                f"搬入 {len(old_values)} 个配置键"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[config:{self.__class__.__name__}] 旧配置迁移失败（使用默认配置）: {e}"
+            )
 
     def _migrate_reg_time_switch(self) -> None:
         """v0.12.20：注册时间从「信息显示选项」独立成开关 ``show_reg_time``。

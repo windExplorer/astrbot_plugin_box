@@ -1,5 +1,40 @@
 # 更新日志
 
+## v0.12.22
+
+需求：**仓库改名为 `astrbot_plugin_moe_box`，本地同步改名**。
+
+插件名（`metadata.yaml` 的 `name`）必须与安装目录名一致，所以这不只是改个仓库名：
+
+- **`metadata.yaml`**：`name` → `astrbot_plugin_moe_box`，`repo` → 新仓库地址；
+- **`core/config.py`**：`_plugin_name` 改为新名（决定数据目录与临时目录）；
+- **`core/webui_api.py`**：`ROUTE_PREFIX` → `/astrbot_plugin_moe_box`（AstrBot 约定路由带插件名）；
+- **`build_zip.ps1`**：`$pluginName` 改为新名（zip 顶层目录与产物文件名跟着变）；
+- **README**：安装链接改为新仓库。
+
+**关键配套：改名后 AstrBot 会把它当成一个全新插件**（配置文件是 `data/config/<插件名>_config.json`，
+数据目录是 `data/plugin_data/<插件名>`），你的入群时间库和全部配置会被「重置」。所以新增
+`PluginConfig._migrate_renamed_plugin` 做一次性搬迁（**旧文件保留不动**，便于回退）：
+
+- **数据目录**：`data/plugin_data/astrbot_plugin_moe_box` 不存在而旧目录存在 → 整目录复制
+  （含 `member_times.db` 与 `-wal`/`-shm`，入群时间/名册/卡片缓存全保留）；
+- **配置**：仅当 AstrBot 本次刚按 schema 默认值创建新配置（`AstrBotConfig.first_deploy == True`，
+  即里面还没有任何用户数据）且旧配置文件存在时，把旧值整体搬入（欢迎语/白名单/`llm_models`
+  模型选择/展示字段等全保留），之后再走既有的「注册时间开关迁移」与 schema 补齐；
+  之后每次启动 `first_deploy` 都是 False，**不会把用户新改的配置覆盖回旧值**；
+- 没有旧数据/旧配置时什么都不做，全新安装行为不变。
+
+> AstrBot 侧的操作顺序：更新/安装新插件（新插件会以 `astrbot_plugin_moe_box` 落地）→ 确认卡片
+> 与面板正常 → **卸载旧插件 `astrbot_plugin_box`**（卸载时选不删数据/配置也不影响，迁移已经
+> 复制完成）。注意新旧插件会同时存在一小段时间，期间两者都可能出卡，尽快卸载旧的。
+
+验证：
+
+- uv 真跑 `core/config.py` 的改名迁移 14 组断言全过：数据目录整目录复制（含 wal）、旧目录保留；
+  首次部署（`first_deploy`）时旧配置整体搬入且「注册时间」联动迁移；第二次启动不覆盖用户新改的
+  配置；无旧数据时不创建目录；非首次部署不搬；新库已存在时不覆盖。
+- `_conf_schema.json` JSON 复核；`compileall` 通过；打包产物顶层目录为 `astrbot_plugin_moe_box`。
+
 ## v0.12.21
 
 起因：用户问「是不是因为我用 SnowLuma 才拿不到注册时间？NapCat 能拿到吗」。

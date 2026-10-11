@@ -1,4 +1,4 @@
-# Package astrbot_plugin_box into an AstrBot-installable zip.
+# Package astrbot_plugin_moe_box into an AstrBot-installable zip.
 #
 # Design notes (adapted from astrbot_plugin_user_gateway, keep them):
 #   1) EXPLICIT include list. New top-level .py modules MUST be added here too,
@@ -30,7 +30,7 @@ if ($PSScriptRoot) {
     $root = (Get-Location).Path
 }
 
-$pluginName = "astrbot_plugin_box"
+$pluginName = "astrbot_plugin_moe_box"
 $distDir = Join-Path $root "dist"
 
 # --- version from metadata.yaml (UTF8) ---
