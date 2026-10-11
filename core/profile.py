@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import textwrap
 from dataclasses import asdict, dataclass, field, fields
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 
 from zhdate import ZhDate
@@ -11,21 +11,28 @@ from zhdate import ZhDate
 from astrbot.api import logger
 
 
-# QQ 号位数 → 注册年代。腾讯从未公开号段归属，这是社区通行的粗略推算，
-# 一律在卡片上标注「按号段估算」；适配器真给了 reg_time 时优先用真值。
-_QQ_ERA_BY_LENGTH: dict[int, str] = {
-    1: "1998~1999年",
-    2: "1998~1999年",
-    3: "1998~1999年",
-    4: "1998~1999年",
-    5: "1998~1999年",
-    6: "1999~2000年",
-    7: "2000~2002年",
-    8: "2002~2005年",
-    9: "2005~2009年",
-    10: "2009~2012年",
+# QQ 号位数 → 注册年份区间 (下界, 上界)，上界为 0 表示公开信息给不出上界。
+# 腾讯从未公开号段归属，这是社区通行的粗略推算（公开说法本身就互相矛盾，见
+# CHANGELOG v0.12.19），一律在卡片上标注「按号段估算」；适配器真给了 reg_time
+# 时优先用真值。
+_QQ_ERA_BY_LENGTH: dict[int, tuple[int, int]] = {
+    1: (1999, 1999),  # 维基百科：1999 年 QQ 刚推出时号码长度为 5 位
+    2: (1999, 1999),
+    3: (1999, 1999),
+    4: (1999, 1999),
+    5: (1999, 1999),
+    6: (1999, 2000),
+    7: (2000, 2002),
+    8: (2002, 2005),
+    9: (2005, 2009),
+    # 10 位号从 2009 年前后开始投放，**至今仍是免费注册的主流长度**（维基：
+    # 「目前通过免费注册的QQ号码长度已达到10位数」），所以上界只能靠
+    # 登录天数 / QQ 等级去压，见 age_days_floor。
+    10: (2009, 0),
 }
-_QQ_ERA_FALLBACK = "2013年以后"
+# 11 位及以上：出现时间肯定晚于 10 位号（≥2009 是安全的），但公开资料给不出
+# 更细的下界，同样靠登录天数 / QQ 等级压上界。
+_QQ_ERA_LONG = (2009, 0)
 
 _YEAR_RE = re.compile(r"(1[6-9]\d{2}|20\d{2})")
 
@@ -93,12 +100,20 @@ def flatten_info(source: Any, _depth: int = 0) -> dict[str, Any]:
     return out
 
 
-def estimate_qq_reg_era(qq: Any) -> str:
-    """按 QQ 号位数粗略推算注册年代；不是纯数字或无法判断时返回空串。"""
+def qq_era_range(qq: Any) -> tuple[int, int]:
+    """按 QQ 号位数给出注册年份区间 (下界, 上界)；上界 0 = 没有上界，无法判断时 (0, 0)。"""
     text = str(qq or "").strip()
     if not text.isdigit():
+        return (0, 0)
+    return _QQ_ERA_BY_LENGTH.get(len(text), _QQ_ERA_LONG)
+
+
+def estimate_qq_reg_era(qq: Any) -> str:
+    """按 QQ 号位数粗略推算注册年代；不是纯数字或无法判断时返回空串。"""
+    low, high = qq_era_range(qq)
+    if not low:
         return ""
-    return _QQ_ERA_BY_LENGTH.get(len(text), _QQ_ERA_FALLBACK)
+    return f"{low}~{high}年" if high else f"{low}年以后"
 
 
 def parse_epoch(value: Any) -> int:
@@ -589,11 +604,28 @@ class BoxUserProfile:
         return f"{year}年" if year else ""
 
     @property
-    def reg_time_text(self) -> str:
-        """注册时间文本：适配器真值优先，拿不到时按 QQ 号号段估算（会标注「估算」）。
+    def age_days_floor(self) -> int:
+        """账号「至少已经存在了多少天」的保守下界，用来把注册时间的上界压下来。
 
-        QQ 官方没有开放「注册时间」接口，能拿到的只有适配器扩展字段；拿不到就用
-        号段推算一个年代区间，总比整行消失强——但必须让用户看出这是估的。
+        两条约束都只会往"更早"的方向修正，方向安全：
+        - 登录天数：不管它是累计、连续还是距注册天数，都必然 ≤ 账号存在天数；
+        - QQ 等级：活跃天数 ``D = L² + 4L``，会员最高约 3 倍加速 → 存在天数 ≥ D/3。
+        """
+        days = _to_int(self.login_days) or 0
+        level = _to_int(self.qq_level) or 0
+        if level > 0:
+            days = max(days, (level * level + 4 * level) // 3)
+        return max(days, 0)
+
+    @property
+    def reg_time_text(self) -> str:
+        """注册时间文本：适配器真值优先，拿不到时估算（并标注是按什么估的）。
+
+        QQ 官方没有开放「注册时间」接口，号段本身也只能给到"几年"的跨度。为了把
+        区间压窄，这里再叠两条方向安全的硬约束（见 ``age_days_floor``）：登录天数与
+        QQ 等级都能说明"账号至少存在了 N 天"，也就是注册时间的上界；与号段区间取
+        交集后区间往往明显变窄（11 位号尤其明显，它本来连上界都没有）。
+        约束与号段区间矛盾时（说明数据不靠谱）不参与收窄，保持号段区间。
         """
         if self.reg_time:
             ts = parse_epoch(self.reg_time)
@@ -605,8 +637,26 @@ class BoxUserProfile:
             matched = _YEAR_RE.search(str(self.reg_time))
             if matched:
                 return f"{matched.group(1)}年"
-        era = estimate_qq_reg_era(self.user_id)
-        return f"{era}（按号段估算）" if era else ""
+
+        low, high = qq_era_range(self.user_id)
+        if not low:
+            return ""
+
+        sources = ["号段"]
+        days = self.age_days_floor
+        if days > 0:
+            bound_year = (date.today() - timedelta(days=days)).year
+            if bound_year >= low and (high == 0 or bound_year < high):
+                high = bound_year
+                if _to_int(self.login_days):
+                    sources.append("登录天数")
+                if (_to_int(self.qq_level) or 0) > 0:
+                    sources.append("等级")
+
+        if high == 0:
+            return f"{low}年以后（按号段估算）"
+        span = f"{low}年" if low == high else f"{low}~{high}年"
+        return f"{span}（按{'+'.join(sources)}估算）"
 
     def _format_field(
         self,
