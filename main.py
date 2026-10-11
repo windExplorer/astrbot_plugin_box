@@ -57,6 +57,7 @@ class BoxPlugin(Star):
         self._recall_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
         self._backfiller = None
         self._backfill_task: asyncio.Task | None = None
+        self._refresher = None
 
     async def initialize(self) -> None:
         """AstrBot 插件生命周期钩子：注册面板路由 + 启动初始化回填。
@@ -64,13 +65,14 @@ class BoxPlugin(Star):
         生命周期钩子抛异常会导致整个插件加载失败，这里全程兜底。
         """
         try:
-            from .core.webui_api import MemberBackfiller, register_apis
+            from .core.webui_api import GroupRefresher, MemberBackfiller, register_apis
         except ImportError:  # 平铺调试
-            from webui_api import MemberBackfiller, register_apis  # type: ignore
+            from webui_api import GroupRefresher, MemberBackfiller, register_apis  # type: ignore
 
         self._backfiller = MemberBackfiller(self.cfg, self.box.store, self._get_bot)
+        self._refresher = GroupRefresher(self.box.store, self._get_bot)
         try:
-            register_apis(self, self._backfiller)
+            register_apis(self, self._backfiller, self._refresher)
         except Exception as e:
             logger.warning(f"[资料卡] 面板路由注册失败（成员数据面板不可用）: {e}")
 
@@ -89,6 +91,24 @@ class BoxPlugin(Star):
         except Exception:
             pass
         return None
+
+    def _schedule_group_refresh(self, group_id: str) -> None:
+        """群成员变动后刷新该群成员数据（去抖 + 按群限频），任何异常都不影响主流程。
+
+        与「记录入群/退群时间」共用同一个配置开关：关掉本地成员数据记录时，
+        连自动刷新也没有意义。
+        """
+        if not self.cfg.record_join_leave:
+            return
+        try:
+            refresher = self._refresher
+            if refresher is None:  # 生命周期钩子还没跑（理论上不会）：兜底现建一个
+                from .core.webui_api import GroupRefresher
+
+                refresher = self._refresher = GroupRefresher(self.box.store, self._get_bot)
+            refresher.schedule(group_id)
+        except Exception as e:
+            logger.warning(f"[资料卡] 群 {group_id} 成员数据自动刷新调度失败: {e}")
 
     async def _safe_init_backfill(self) -> None:
         """等适配器就绪后，对全部群做一次成员资料回填（12 小时内不重复）。"""
@@ -127,6 +147,8 @@ class BoxPlugin(Star):
             for t in list(self._recall_tasks):
                 t.cancel()
             await asyncio.gather(*self._recall_tasks, return_exceptions=True)
+        if self._refresher:
+            self._refresher.cancel()
         if self._backfill_task and not self._backfill_task.done():
             self._backfiller.cancel()
             self._backfill_task.cancel()
@@ -224,11 +246,7 @@ class BoxPlugin(Star):
         """自动展示新群友/主动退群之人的资料卡"""
         raw = getattr(event.message_obj, "raw_message", None)
 
-        if not (
-            isinstance(raw, dict)
-            and raw.get("post_type") == "notice"
-            and raw.get("user_id") != raw.get("self_id")
-        ):
+        if not (isinstance(raw, dict) and raw.get("post_type") == "notice"):
             return
 
         is_enter = raw.get("notice_type") == "group_increase"
@@ -240,6 +258,12 @@ class BoxPlugin(Star):
             raw.get("notice_type") == "group_decrease"
             and raw.get("sub_type") == "kick"
         )
+
+        if raw.get("user_id") == raw.get("self_id"):
+            # 机器人自己进群：没有别人的资料卡要展示，但该群的成员数据值得拉一次
+            if is_enter:
+                self._schedule_group_refresh(str(raw.get("group_id") or ""))
+            return
 
         if not (is_enter or is_leave or is_kick):
             return
@@ -257,6 +281,10 @@ class BoxPlugin(Star):
                     self.box.store.record_leave(group_id, user_id, now)
             except Exception as e:
                 logger.warning(f"[资料卡] 记录入退群时间失败: {e}")
+
+        # 成员变动后重拉该群成员列表入库（去抖 + 按群限频），
+        # 与「是否展示卡片」无关：面板的群人数/记录覆盖率也跟着更新
+        self._schedule_group_refresh(group_id)
 
         if not (
             (is_enter and self.cfg.autobox.enter)

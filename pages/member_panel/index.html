@@ -35,7 +35,7 @@
           <n-h2>概览</n-h2>
           <n-grid :x-gap="12" :y-gap="12" :cols="4">
             <n-gi><n-card size="small"><n-statistic label="群数量" :value="groups.length"></n-statistic></n-card></n-gi>
-            <n-gi><n-card size="small"><n-statistic label="成员总数" :value="totalMembers"></n-statistic></n-card></n-gi>
+            <n-gi><n-card size="small"><n-statistic label="在群成员" :value="totalMembers"></n-statistic></n-card></n-gi>
             <n-gi><n-card size="small"><n-statistic label="群内信息已记录" :value="totalInfoRecorded"></n-statistic></n-card></n-gi>
             <n-gi><n-card size="small"><n-statistic label="入群时间已记录" :value="totalJoinRecorded"></n-statistic></n-card></n-gi>
           </n-grid>
@@ -67,6 +67,14 @@
                 </template>
                 <template v-else>尚未执行回填。读取后，退群/被踢卡的加群时间、在群时长、群等级、群头衔、入群排位都会更完整。</template>
               </n-text>
+              <n-text depth="3">
+                成员变动自动刷新：
+                <template v-if="refresher.last_at">
+                  最近一次 {{ refresher.last_at }}（群 {{ refresher.last_group }}），累计 {{ refresher.refreshed }} 次；
+                </template>
+                <template v-else>尚未触发（有人在群里进出时才会触发）——</template>
+                群内有成员入群 / 退群 / 被踢后会自动重拉该群成员数据（同群 20 秒内的变动合并成一次，两次之间至少间隔 90 秒）。
+              </n-text>
             </n-space>
           </n-card>
         </template>
@@ -80,6 +88,11 @@
                 <n-button size="small" @click="refresh()">🔄 刷新</n-button>
               </n-space>
             </template>
+            <n-alert type="info" :bordered="false" style="margin-bottom:12px">
+              <div>「群人数」是 QQ 上报的实时人数；括号里的「名册」是最近一次拉到的成员列表长度，两者相差 1~2 人属正常。</div>
+              <div>「群内信息记录 / 入群时间记录」的分母是<b>当前名册</b>（现在还在群里的人）；已经退群/被踢的历史记录单独计入「已离群记录」，不再混进覆盖率，所以不会再出现「记录数比群人数还多」。</div>
+              <div>有人入群 / 退群 / 被踢后会自动刷新该群数据：同群 20 秒内的多次变动合并成一次，两次刷新之间至少间隔 90 秒。</div>
+            </n-alert>
             <n-data-table
               :columns="groupColumns"
               :data="groups"
@@ -211,6 +224,7 @@
       var loading = ref(false);
       var groups = ref([]);
       var backfill = ref({});
+      var refresher = ref({});
       var groupPagination = { pageSize: 10 };
 
       // ───────────────────────── 成员抽屉状态 ─────────────────────────
@@ -326,6 +340,7 @@
         return bridge.apiGet("groups", { _t: Date.now() }).then(function (d) {
           groups.value = d.groups || [];
           backfill.value = d.backfill || {};
+          refresher.value = d.refresher || {};
         }).catch(function (e) { message.error(e.message); })
           .finally(function () { loading.value = false; });
       }
@@ -447,6 +462,19 @@
       }
 
       // ───────────────────────── 表格列 ─────────────────────────
+      // 覆盖率进度条：分母是「当前名册」（现在还在群里的人），不是历史记录总数
+      function recordBar(g, recorded) {
+        var total = g.listed || 0;
+        if (!total) return h("span", { class: "muted" }, "未回填");
+        var rec = recorded || 0;
+        var pct = Math.round(rec * 100 / total);
+        return h("div", null, [
+          h("div", { style: "margin-bottom:4px" }, rec + " / " + total),
+          h(NS.NProgress, { type: "line", percentage: pct, showIndicator: false, height: 7, borderRadius: 4,
+                            status: pct >= 100 ? "success" : "default" })
+        ]);
+      }
+
       var groupColumns = [
         { title: "群", key: "group_name", render: function (g) {
             return h("div", { style: "display:flex;align-items:center;gap:10px" }, [
@@ -458,28 +486,32 @@
               ])
             ]);
           } },
-        { title: "群人数", key: "listed", width: 90, render: function (g) {
-            var base = g.listed || g.member_count || 0;
-            if (g.member_count && g.member_count !== base) {
-              return h("div", null, [
-                String(base) + " ",
-                h("span", { class: "muted" }, "(报告 " + g.member_count + ")")
-              ]);
+        { title: "群人数", key: "member_count", width: 130, render: function (g) {
+            // 主数字用 QQ 上报的实时人数（每次刷新页面都会重新问一次），
+            // 括号里是最近一次拉到的成员列表长度（名册）——两者略有出入属正常
+            var live = g.member_count || 0;
+            var roster = g.listed || 0;
+            var parts = [String(live || roster)];
+            if (live && roster && roster !== live) {
+              parts.push(h("span", { class: "muted" }, " （名册 " + roster + "）"));
+            } else if (!roster) {
+              parts.push(h("span", { class: "muted" }, " （未回填）"));
             }
-            return String(base);
+            return h("div", null, parts);
           } },
-        { title: "群内信息记录", key: "info_recorded", width: 170, render: function (g) {
-            var total = g.listed || g.member_count || 0;
-            var pct = total ? Math.round((g.info_recorded || 0) * 100 / total) : 100;
-            return h("div", null, [
-              h("div", { style: "margin-bottom:4px" }, g.info_recorded + " / " + total),
-              h(NS.NProgress, { type: "line", percentage: pct, showIndicator: false, height: 7, borderRadius: 4,
-                                status: pct >= 100 ? "success" : "default" })
-            ]);
+        { title: "群内信息记录", key: "info_recorded", width: 160, render: function (g) {
+            return recordBar(g, g.info_recorded);
           } },
-        { title: "入群时间记录", key: "join_recorded", width: 110, render: function (g) { return String(g.join_recorded || 0); } },
+        { title: "入群时间记录", key: "join_recorded", width: 160, render: function (g) {
+            return recordBar(g, g.join_recorded);
+          } },
+        { title: "已离群记录", key: "departed_recorded", width: 110, render: function (g) {
+            var n = g.departed_recorded || 0;
+            if (!n) return h("span", { class: "muted" }, "—");
+            return h("span", null, String(n) + " 人");
+          } },
         { title: "状态", key: "state", width: 100, render: function (g) {
-            if (!g.listed) return h(NS.NTag, { size: "small", bordered: false }, { default: function () { return "未回填"; } });
+            if (!g.has_roster) return h(NS.NTag, { size: "small", bordered: false }, { default: function () { return "未回填"; } });
             var unrec = g.unrecorded || 0;
             return h(NS.NTag, { size: "small", type: unrec ? "warning" : "success", bordered: false },
                      { default: function () { return unrec ? "缺 " + unrec : "已齐全"; } });
@@ -545,7 +577,7 @@
         activePage: activePage, menuOptions: menuOptions, onMenuUpdate: onMenuUpdate,
         loading: loading, groups: groups, totalMembers: totalMembers,
         totalInfoRecorded: totalInfoRecorded, totalJoinRecorded: totalJoinRecorded,
-        backfill: backfill, backfillPct: backfillPct,
+        backfill: backfill, backfillPct: backfillPct, refresher: refresher,
         startBackfill: startBackfill, cancelBackfill: cancelBackfill, refresh: refresh,
         groupColumns: groupColumns, groupPagination: groupPagination,
         drawerShow: drawerShow, drawerTitle: drawerTitle,

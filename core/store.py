@@ -8,6 +8,11 @@ leaver cards still show join/leave times.
 The card cache table keeps the last fetched card per (group, user) so that
 repeated queries within the cooldown window are served without re-hitting
 the QQ APIs or the LLM.
+
+``group_roster`` stores a snapshot of the members actually present in a group
+(one row per member, replaced wholesale on every live member-list fetch). It is
+what the panel's coverage numbers are measured against, so records of people
+who left without their notice ever being observed do not inflate the counts.
 """
 
 import json
@@ -44,6 +49,12 @@ CREATE TABLE IF NOT EXISTS member_info (
     role  TEXT NOT NULL DEFAULT '',
     level TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS group_roster (
+    group_id TEXT NOT NULL,
+    user_id  TEXT NOT NULL,
+    seen_at  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS meta (
@@ -212,14 +223,67 @@ class MemberStore:
             ).fetchall()
         return {r[0]: r[1] for r in rows}
 
-    def departed_joins_for_group(self, group_id: str) -> dict[str, str]:
-        """已离群成员（有退群/被踢记录）的入群时间，用于估算离群者的历史排位。"""
+    def departed_times_for_group(self, group_id: str) -> dict[str, tuple[str, str]]:
+        """已离群成员（有退群/被踢记录）的 (入群时间, 退群时间)。
+
+        用于估算离群者卡片的历史排位，以及「他离群那一刻群里有几个人」。
+        """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT user_id, join_time FROM member_times WHERE group_id = ? AND leave_time != ''",
+                "SELECT user_id, join_time, leave_time FROM member_times "
+                "WHERE group_id = ? AND leave_time != ''",
                 (group_id,),
             ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    # ------------------------------------------------------ 当前名册快照
+    def replace_roster(self, group_id: str, user_ids: list[str], seen_at: str) -> None:
+        """整表替换某群的「当前名册」快照。
+
+        名册是「该群此刻实际有哪些人」的权威副本，每次拉到实时成员列表时整体替换，
+        天然自愈——历史遗留的幽灵记录（退群事件没观测到）不会留在名册里。
+        """
+        data = [(group_id, str(u), seen_at) for u in user_ids if str(u)]
+        with self._lock:
+            self._conn.execute("DELETE FROM group_roster WHERE group_id = ?", (group_id,))
+            if data:
+                self._conn.executemany(
+                    "INSERT OR REPLACE INTO group_roster (group_id, user_id, seen_at) VALUES (?, ?, ?)",
+                    data,
+                )
+            self._conn.commit()
+
+    def roster_stats(self) -> dict[str, dict[str, int]]:
+        """按群统计名册对齐情况（一次查询取全部群）。
+
+        返回 ``{group_id: {"present", "missing_info", "missing_join", "missing_any"}}``：
+        名册人数、以及名册中缺群内信息 / 缺入群时间 / 两者缺其一的人数。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT r.group_id,
+                       COUNT(*) AS present,
+                       SUM(CASE WHEN i.user_id IS NULL THEN 1 ELSE 0 END) AS missing_info,
+                       SUM(CASE WHEN t.user_id IS NULL THEN 1 ELSE 0 END) AS missing_join,
+                       SUM(CASE WHEN i.user_id IS NULL OR t.user_id IS NULL THEN 1 ELSE 0 END) AS missing_any
+                FROM group_roster r
+                LEFT JOIN member_info i
+                       ON i.group_id = r.group_id AND i.user_id = r.user_id
+                LEFT JOIN member_times t
+                       ON t.group_id = r.group_id AND t.user_id = r.user_id AND t.join_time != ''
+                GROUP BY r.group_id
+                """
+            ).fetchall()
+        return {
+            r[0]: {
+                "present": int(r[1] or 0),
+                "missing_info": int(r[2] or 0),
+                "missing_join": int(r[3] or 0),
+                "missing_any": int(r[4] or 0),
+            }
+            for r in rows
+        }
 
     def get_meta(self, key: str) -> str:
         with self._lock:

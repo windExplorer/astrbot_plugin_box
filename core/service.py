@@ -15,6 +15,10 @@ from .draw import CardMaker
 from .profile import BoxUserProfile, friendly_duration, join_duration_suffix
 from .store import MemberStore
 
+# 入群排位的「名册宽限窗口」：适配器成员列表可能滞后，事件里见过但列表还没收录的
+# 新成员在此窗口内仍算在群；更早的记录视为幽灵（退群事件漏收），不计入总数。
+PRESENCE_GRACE_SECONDS = 3600
+
 library_display_options = [
     "names",
     "nicknames",
@@ -547,9 +551,14 @@ class BoxService:
     async def _get_join_rank(self, bot: CQHttp, group_id: str, target_id: str) -> tuple[str, int, int]:
         """Compute the member's join order within the group.
 
-        名册以适配器实时成员列表为底，再用本地事件记录校正两处偏差：适配器可能
-        仍在回吐自身缓存（刚进群的人不在列表里 → 总数漏计），也可能还留着已知
-        已退群/被踢的成员（→ 总数重复计入）。
+        名册以适配器**实时**成员列表为准（优先 `no_cache`）。本地事件记录只用来补
+        一处偏差：刚进群、适配器列表还没收录的新成员，按本地精确入群时间补进名册
+        ——但只认「入群时间在宽限窗口内」的。比窗口更早、却又不在实时列表里的记录，
+        是「退群时没观测到退群事件」留下的幽灵（bot 离线、漏收 notice 等），一律不
+        再计入，否则「共 M 人」会随使用时间越涨越大、远高于实际群人数。
+
+        反过来，本地有退群记录的人也不再强行从实时名册里剔除：既然这次列表里还有
+        他，就说明他确实在群里（可能是重新入群而没观测到事件），误剔会导致永久少算。
 
         Returns (display_text, position, total); text is "" when unavailable.
         """
@@ -566,7 +575,7 @@ class BoxService:
                 return "", 0, 0
 
         try:
-            departed = self.store.departed_joins_for_group(group_id)
+            departed = self.store.departed_times_for_group(group_id)
         except Exception:
             departed = {}
         roster: dict[str, int] = {}
@@ -577,16 +586,17 @@ class BoxService:
                 continue
             if join_time > 0:
                 roster[str(m.get("user_id"))] = join_time
-        for uid in departed:
-            roster.pop(uid, None)
-        # 事件里见过、但适配器列表还没收录的新成员：按本地精确入群时间补进名册
+
+        now_ts = datetime.now().timestamp()
         for uid, jt in self.store.join_times_for_group(group_id).items():
             if uid in roster or uid in departed or not jt:
                 continue
             try:
-                roster[uid] = int(datetime.strptime(jt, "%Y-%m-%d %H:%M:%S").timestamp())
+                ts = int(datetime.strptime(jt, "%Y-%m-%d %H:%M:%S").timestamp())
             except ValueError:
                 continue
+            if 0 <= now_ts - ts <= PRESENCE_GRACE_SECONDS:
+                roster[uid] = ts
 
         joined = sorted((ts, uid) for uid, ts in roster.items())
         if not joined:
@@ -594,10 +604,14 @@ class BoxService:
 
         for idx, (_t, uid) in enumerate(joined, start=1):
             if uid == target_id:
+                # 在群成员：排位与总数都只针对「现在还在群里的人」——
+                # 第 N 位（现有成员中的加入次序）· 共 M 人（当前实际在群人数）
                 return f"第 {idx} 位 · 共 {len(joined)} 人", idx, len(joined)
-        # 目标已不在群里（退群/被踢）：排位与总数都把已知的离群成员算进去——
-        # 排位 = 早于其入群的现有成员数 + 早于其入群的已知离群者数 + 1；
-        # 总数 = 现有成员数 + 已知离群者数
+        # 目标已不在群里（退群/被踢）：排位按「历史加入次序」算（含已知离群者），
+        # 总数取其**离群那一刻的群规模**——当时已经入群、且那时还没走的人（含他自己），
+        # 而不是「现有 + 所有历史离群者」：后者会随时间无限膨胀（群一年换一半人，
+        # 卡片就会显示「共 上千人」）。退群时刻没记录到时退回当前在群规模。
+        gone = {uid: jt for uid, (jt, _lt) in departed.items() if uid not in roster}
         try:
             record = self.store.get(group_id, target_id)
         except Exception:
@@ -606,20 +620,44 @@ class BoxService:
             try:
                 join_dt = datetime.strptime(record[0], "%Y-%m-%d %H:%M:%S")
                 before = sum(1 for t, _u in joined if datetime.fromtimestamp(t) < join_dt)
-                for uid, jt in departed.items():
+                for uid, jt in gone.items():
                     if uid == target_id or not jt:
                         continue
-                    try:
-                        if datetime.strptime(jt, "%Y-%m-%d %H:%M:%S") < join_dt:
-                            before += 1
-                    except ValueError:
-                        continue
+                    joined_at = self._parse_dt(jt)
+                    if joined_at is not None and joined_at < join_dt:
+                        before += 1
                 pos = 1 + before
-                total = len(joined) + len(departed)
-                return f"第 {pos} 位 · 共 {total} 人", pos, total
+
+                ref_dt = self._parse_dt(record[1])
+                if ref_dt is None:
+                    total = len(joined) + len(gone)
+                else:
+                    present_at_leave = sum(
+                        1 for t, _u in joined if datetime.fromtimestamp(t) < ref_dt
+                    )
+                    gone_at_leave = 0
+                    for uid, jt in gone.items():
+                        if uid == target_id or not jt:
+                            continue
+                        joined_at = self._parse_dt(jt)
+                        if joined_at is None or joined_at >= ref_dt:
+                            continue
+                        left_at = self._parse_dt(departed.get(uid, ("", ""))[1])
+                        if left_at is not None and left_at < ref_dt:
+                            continue  # 比目标还早离群：目标离群时他已经不在了
+                        gone_at_leave += 1
+                    total = present_at_leave + gone_at_leave + 1  # +1 是目标本人
+                return f"第 {pos} 位 · 共 {total} 人", pos, max(total, pos)
             except ValueError:
                 pass
         return "", 0, 0
+
+    @staticmethod
+    def _parse_dt(text: str) -> datetime | None:
+        try:
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return None
 
     async def _get_analyses(
         self, target_id: str, profile: BoxUserProfile, display: list[str], card_type: str = ""

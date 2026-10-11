@@ -10,12 +10,17 @@
 成员数据回填（MemberBackfiller）：拉取机器人所在群的成员列表，
 把群昵称/头衔/身份/等级写入 member_info，把 join_time 回填进 member_times，
 使退群/被踢卡的信息行不依赖「该成员曾被查询过」。
+
+成员变动自动刷新（GroupRefresher）：QQ 不会推送「群成员列表变了」这样的事件，
+只有人来人走的 notice；拿到 notice 后按群去抖、限频地重拉一次该群成员列表入库，
+面板的「群人数 / 记录覆盖率」不再要等到下一次全量回填（最长 12 小时）才更新。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime
 from typing import Any
 
@@ -104,6 +109,64 @@ async def _body() -> dict:
     return {}
 
 
+async def fetch_member_list(bot, group_id: str) -> list:
+    """取群成员列表：优先 no_cache（适配器默认会回吐自身缓存，人数会滞后）。"""
+    try:
+        return await bot.get_group_member_list(group_id=int(group_id), no_cache=True)
+    except Exception as e:
+        logger.debug(f"[资料卡] 群 {group_id} 成员列表不支持 no_cache，退回默认取数: {e}")
+    return await bot.get_group_member_list(group_id=int(group_id))
+
+
+def ingest_group_members(store, group_id: str, members: list) -> int:
+    """把一次实时成员列表落库：群内信息 / 入群时间 / 当前名册快照。
+
+    名册快照（``group_roster``）整体替换，是「该群此刻实际有哪些人」的权威副本：
+    面板的覆盖率统计以它为准，而不是以 member_times 里累计的历史记录为准——否则
+    「退群时没观测到退群事件」的幽灵记录会让各项计数虚高、对不上实际群人数。
+    """
+    seen_at = datetime.now().strftime(FMT)
+    info_rows: list[tuple] = []
+    join_rows: list[tuple] = []
+    present: list[str] = []
+    for m in members or []:
+        uid = str(m.get("user_id") or "")
+        if not uid:
+            continue
+        present.append(uid)
+        info_rows.append(
+            (
+                group_id,
+                uid,
+                str(m.get("card") or ""),
+                str(m.get("title") or ""),
+                str(m.get("role") or ""),
+                str(m.get("level") or ""),
+            )
+        )
+        try:
+            jt = int(m.get("join_time") or 0)
+        except (TypeError, ValueError):
+            jt = 0
+        if jt > 0:
+            try:
+                join_rows.append((group_id, uid, datetime.fromtimestamp(jt).strftime(FMT)))
+            except (OSError, OverflowError, ValueError):
+                pass
+    store.put_member_info_many(info_rows)
+    store.ensure_join_many(join_rows)
+    store.replace_roster(group_id, present, seen_at)
+    # 记录该群成员列表的实际长度：群报告人数(member_count)经常滞后 1~2 人，
+    # 覆盖率统计以列表数为准，否则会出现"幽灵缺口"
+    try:
+        listed = json.loads(store.get_meta("group_listed") or "{}")
+        listed[group_id] = len(present)
+        store.set_meta("group_listed", json.dumps(listed, ensure_ascii=False))
+    except Exception:
+        pass
+    return len(present)
+
+
 class MemberBackfiller:
     """后台任务：遍历机器人所在群，批量入库成员群内信息与入群时间。"""
 
@@ -162,53 +225,20 @@ class MemberBackfiller:
                 gid = str(g.get("group_id") or "")
                 self.state["current_group"] = f"{g.get('group_name') or ''}({gid})"
                 try:
-                    members = await bot.get_group_member_list(group_id=int(gid))
+                    members = await fetch_member_list(bot, gid)
                 except Exception as e:
                     self.state["errors"] += 1
                     self.state["last_error"] = f"群 {gid} 成员列表获取失败: {e}"
                     self.state["done_groups"] += 1
                     continue
-                info_rows: list[tuple] = []
-                join_rows: list[tuple] = []
-                for m in members:
-                    uid = str(m.get("user_id") or "")
-                    if not uid:
-                        continue
-                    info_rows.append(
-                        (
-                            gid,
-                            uid,
-                            str(m.get("card") or ""),
-                            str(m.get("title") or ""),
-                            str(m.get("role") or ""),
-                            str(m.get("level") or ""),
-                        )
-                    )
-                    try:
-                        jt = int(m.get("join_time") or 0)
-                    except (TypeError, ValueError):
-                        jt = 0
-                    if jt > 0:
-                        try:
-                            join_rows.append((gid, uid, datetime.fromtimestamp(jt).strftime(FMT)))
-                        except (OSError, OverflowError):
-                            pass
                 try:
-                    self.store.put_member_info_many(info_rows)
-                    self.store.ensure_join_many(join_rows)
-                    self.state["recorded_members"] += len(info_rows)
+                    count = ingest_group_members(self.store, gid, members)
+                    self.state["recorded_members"] += count
                 except Exception as e:
                     self.state["errors"] += 1
                     self.state["last_error"] = f"群 {gid} 入库失败: {e}"
-                # 记录该群成员列表的实际长度：群报告人数(member_count)经常滞后 1~2 人，
-                # 覆盖率统计以列表数为准，否则会出现"幽灵缺口"
-                try:
-                    listed = json.loads(self.store.get_meta("group_listed") or "{}")
-                    listed[gid] = len(members)
-                    self.store.set_meta("group_listed", json.dumps(listed, ensure_ascii=False))
-                except Exception:
-                    pass
-                self.state["total_members"] += len(members)
+                    count = 0
+                self.state["total_members"] += count
                 self.state["done_groups"] += 1
                 await asyncio.sleep(GROUP_SLEEP_SECONDS)
         except Exception as e:
@@ -220,7 +250,100 @@ class MemberBackfiller:
             self.state["current_group"] = ""
 
 
-def register_apis(plugin, backfiller: MemberBackfiller) -> None:
+class GroupRefresher:
+    """成员变动（入群/退群/被踢）后，按群去抖 + 限频地刷新该群成员数据。
+
+    同一个群里连续几个人进出只拉一次成员列表（去抖窗口内的事件合并），且同一群两次
+    刷新之间有最小间隔，避免活跃群把接口打满。刷新期间又发生变动的群会被标记为
+    「脏」，本轮结束后再补一轮（间隔限制仍然生效）。
+    """
+
+    DEBOUNCE_SECONDS = 20
+    MIN_INTERVAL_SECONDS = 90
+
+    def __init__(self, store, get_bot):
+        self.store = store
+        self.get_bot = get_bot
+        self._pending: dict[str, asyncio.Task] = {}
+        self._dirty: set[str] = set()
+        self._last_run: dict[str, float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self.stats: dict[str, Any] = {
+            "refreshed": 0,
+            "recorded": 0,
+            "errors": 0,
+            "last_error": "",
+            "last_group": "",
+            "last_at": "",
+        }
+
+    def status(self) -> dict[str, Any]:
+        out = dict(self.stats)
+        out["pending"] = len(self._pending)
+        return out
+
+    def schedule(self, group_id: str) -> bool:
+        """登记一次刷新（去抖）。返回是否新建了任务。"""
+        gid = str(group_id or "").strip()
+        if not gid or not gid.isdigit():
+            return False
+        self._dirty.add(gid)
+        if gid in self._pending:
+            return False
+        try:
+            self._pending[gid] = asyncio.create_task(self._loop(gid))
+        except RuntimeError as e:  # 没有事件循环（例如同步上下文里被调用）
+            self._dirty.discard(gid)
+            logger.warning(f"[资料卡] 群 {gid} 成员数据自动刷新无法启动: {e}")
+            return False
+        return True
+
+    async def _loop(self, gid: str) -> None:
+        try:
+            while True:
+                self._dirty.discard(gid)
+                await asyncio.sleep(self.DEBOUNCE_SECONDS)
+                wait = self.MIN_INTERVAL_SECONDS - (time.monotonic() - self._last_run.get(gid, 0.0))
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                await self.refresh(gid)
+                if gid not in self._dirty:
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.stats["errors"] += 1
+            self.stats["last_error"] = f"群 {gid} 刷新失败: {e}"
+            logger.warning(f"[资料卡] 群 {gid} 成员数据自动刷新失败: {e}")
+        finally:
+            self._pending.pop(gid, None)
+            self._dirty.discard(gid)
+
+    async def refresh(self, gid: str) -> int:
+        """立即刷新一个群，返回入库的名册人数。"""
+        bot = self.get_bot()
+        if not bot:
+            raise RuntimeError("未找到 OneBot 适配器")
+        lock = self._locks.setdefault(gid, asyncio.Lock())
+        async with lock:
+            members = await fetch_member_list(bot, gid)
+            count = ingest_group_members(self.store, gid, members)
+        self._last_run[gid] = time.monotonic()
+        self.stats["refreshed"] += 1
+        self.stats["recorded"] += count
+        self.stats["last_group"] = gid
+        self.stats["last_at"] = datetime.now().strftime(FMT)
+        logger.info(f"[资料卡] 群 {gid} 成员变动后已自动刷新：名册 {count} 人")
+        return count
+
+    def cancel(self) -> None:
+        for task in list(self._pending.values()):
+            task.cancel()
+        self._pending.clear()
+        self._dirty.clear()
+
+
+def register_apis(plugin, backfiller: MemberBackfiller, refresher: GroupRefresher | None = None) -> None:
     """把面板路由注册到 AstrBot（在插件 initialize() 中调用）。"""
 
     async def h_groups(*_args, **_kwargs) -> dict:
@@ -231,31 +354,53 @@ def register_apis(plugin, backfiller: MemberBackfiller) -> None:
             groups = await bot.get_group_list()
         except Exception as e:
             return _err(f"获取群列表失败: {e}")
+        store = plugin.box.store
         try:
-            info_counts = plugin.box.store.info_counts()
-            join_counts = plugin.box.store.join_counts()
-            listed_map = json.loads(plugin.box.store.get_meta("group_listed") or "{}")
+            info_counts = store.info_counts()
+            join_counts = store.join_counts()
+            listed_map = json.loads(store.get_meta("group_listed") or "{}")
+            roster = store.roster_stats()
         except Exception as e:
             return _err(f"读取统计失败: {e}")
         out = []
         for g in groups:
             gid = str(g.get("group_id") or "")
             member_count = int(g.get("member_count") or 0)
-            # 列表数 > 群报告数时以列表为准；从未回填过的群没有列表数，用群报告数
-            listed = listed_map.get(gid) or member_count
-            unrec = max(listed - info_counts.get(gid, 0), 0)
+            rs = roster.get(gid) or {}
+            present = int(rs.get("present") or 0)
+            if present:
+                # 有名册快照：覆盖率以「现在还在群里的人」为准，历史离群记录不计入分子分母
+                info_present = max(present - int(rs.get("missing_info") or 0), 0)
+                join_present = max(present - int(rs.get("missing_join") or 0), 0)
+                unrec = int(rs.get("missing_any") or 0)
+            else:
+                # 从未回填/刷新过该群：退回旧的粗估（列表数取上次回填值或群报告值）
+                present = int(listed_map.get(gid) or member_count or 0)
+                info_present = min(info_counts.get(gid, 0), present)
+                join_present = min(join_counts.get(gid, 0), present)
+                unrec = max(present - info_counts.get(gid, 0), 0)
             out.append(
                 {
                     "group_id": gid,
                     "group_name": str(g.get("group_name") or ""),
                     "member_count": member_count,
-                    "listed": listed,
-                    "info_recorded": info_counts.get(gid, 0),
-                    "join_recorded": join_counts.get(gid, 0),
+                    "listed": present,
+                    "has_roster": bool(rs),
+                    "info_recorded": info_present,
+                    "join_recorded": join_present,
+                    "info_recorded_all": info_counts.get(gid, 0),
+                    "join_recorded_all": join_counts.get(gid, 0),
+                    "departed_recorded": max(join_counts.get(gid, 0) - join_present, 0),
                     "unrecorded": unrec,
                 }
             )
-        return _ok({"groups": out, "backfill": backfiller.status()})
+        return _ok(
+            {
+                "groups": out,
+                "backfill": backfiller.status(),
+                "refresher": refresher.status() if refresher else {},
+            }
+        )
 
     async def h_backfill_status(*_args, **_kwargs) -> dict:
         return _ok(backfiller.status())
