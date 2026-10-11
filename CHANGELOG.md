@@ -1,5 +1,29 @@
 # 更新日志
 
+## v0.12.23
+
+现象：面板「插件配置」点保存报
+**「保存失败：Failed to execute 'postMessage' on 'Window': [object Object] could not be cloned.」**
+
+根因：面板与 AstrBot 的桥接用 `postMessage` 传载荷，而 `postMessage` 走**结构化克隆**——它不能
+序列化 Proxy。`cfgGet` 是从 `ref({})` 里读值的，Vue 会把嵌套的数组/对象深代理成响应式 Proxy，
+所以凡是列表/对象类的配置（`protect_ids`、`display_options`、`white_groups`、`welcome_images`…）
+发请求时就带着 Proxy，一克隆就炸。`saveModels` 的 `selection` 同理。
+这是个老问题（旧版保存按钮同样会炸），这次配置页重构后保存用得多了才暴露。
+
+修复：
+
+- `postConfig` 发请求前先把载荷 `cloneJson`（JSON 深拷贝）成**纯对象**，基线同步也用纯值；
+  键数量改按纯化后的载荷统计（`undefined` 会被 JSON 丢掉，避免计数虚高）；
+- `saveModels` 的 `selection` 同样先转纯 JSON。
+
+验证：
+
+- Node 侧先确认前提：`structuredClone(new Proxy(...))` 确实抛错、普通对象可以（与线上报错一致）；
+- 从 `index.html` 抠出 `postConfig`/`cloneJson`/`setAt`/`cfgGet` 配真实桩桥接（桥接侧同样用
+  `structuredClone` 校验载荷）跑 9 组断言全过：含 Proxy 的载荷能保存成功且整体可克隆、布尔/数组
+  原样、空改动不发请求、有成功提示。
+
 ## v0.12.22
 
 需求：**仓库改名为 `astrbot_plugin_moe_box`，本地同步改名**。

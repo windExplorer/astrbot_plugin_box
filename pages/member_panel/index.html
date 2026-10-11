@@ -546,7 +546,8 @@
 
       function saveModels() {
         savingModels.value = true;
-        return bridge.apiPost("llm/models/set", { selection: selection.value })
+        // selection 是响应式 Proxy，桥接的 postMessage 克隆不了，先转纯 JSON
+        return bridge.apiPost("llm/models/set", { selection: cloneJson(selection.value) })
           .then(function () { message.success("模型设置已保存"); })
           .catch(function (e) { message.error("保存失败：" + e.message); })
           .finally(function () { savingModels.value = false; });
@@ -636,10 +637,14 @@
       }
 
       function postConfig(values, tip) {
-        var keys = Object.keys(values);
+        // 必须先转成纯 JSON 再交给桥接：cfgGet 返回的是 Vue 响应式 Proxy，
+        // postMessage 的结构化克隆不能序列化 Proxy，会报
+        // "Failed to execute 'postMessage' on 'Window': [object Object] could not be cloned."
+        var plain = cloneJson(values) || {};
+        var keys = Object.keys(plain);
         if (!keys.length) { message.info("没有需要保存的改动"); return Promise.resolve(); }
-        return bridge.apiPost("config", { values: values }).then(function () {
-          keys.forEach(function (k) { setAt(configBaseline.value, k, cloneJson(values[k])); });
+        return bridge.apiPost("config", { values: plain }).then(function () {
+          keys.forEach(function (k) { setAt(configBaseline.value, k, cloneJson(plain[k])); });
           message.success(tip + "（" + keys.length + " 项）");
         }).catch(function (e) { message.error("保存失败：" + e.message); });
       }
