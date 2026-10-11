@@ -1,5 +1,39 @@
 # 更新日志
 
+## v0.12.21
+
+起因：用户问「是不是因为我用 SnowLuma 才拿不到注册时间？NapCat 能拿到吗」。
+
+**去两边源码里查证了（不是猜）**，结论如下：
+
+| 字段 | NapCat（`get_stranger_info`） | SnowLuma（`get_stranger_info`） |
+| --- | --- | --- |
+| `reg_time`（注册时间戳，秒） | ✅ 有 | ✅ 有（描述写明「注册时间戳（秒），**不可用时省略**」） |
+| `login_days`（登录天数） | ❌ 字段还在但**已失效**（源码硬编码返回 `0`，注释写着「失效」） | ❌ 明确「登录天数暂无可靠来源，不返回占位值」 |
+| `birthday`（生日） | ❌ 返回结构里没有 | ❌ 没有 |
+| `qid` / `uid` / `long_nick` / `sex` / `age` / `qqLevel` | ✅ 有 | ✅ 有（`qq_level`/`qqLevel`/`level` 三个别名都给） |
+| `is_vip` / `is_years_vip` / `vip_level` | ✅ 有 | ✅ 有（注释写明「兼容 NapCat」） |
+
+核查来源：`NapNeko/NapCatQQ` → `packages/napcat-onebot/action/go-cqhttp/GetStrangerInfo.ts`；
+`SnowLuma/SnowLuma` → `packages/onebot/src/actions/friend.ts`。
+
+所以**不是"SnowLuma 不支持"**：两边都定义了 `reg_time`，而且是**拿不到时直接省略字段**（非好友、
+对方隐私设置、或适配器版本较旧都会这样）。也就是说——注册时间能不能拿到，取决于**这一次请求**，
+而不是换个适配器就一定行。
+
+本次改动：
+
+- 更正 v0.12.18 里的一处说法：那里写「NapCat 会返回 `reg_time`、`login_days`」——`reg_time` 是对的，
+  但 **`login_days` 在 NapCat 上已失效（返回 0）**。这意味着 v0.12.19 加的两条收窄约束里，
+  「登录天数」在 NapCat/SnowLuma 上都走不通，**实际只剩 QQ 等级那一条**（`存在天数 ≥ D/3`，
+  见 v0.12.19）。代码不用改（读到 0 会自动忽略），但结论要说清楚。
+- 把上面这张表的要点写进**一次性诊断日志**：拿不到注册时间/生日时打印的提示里，现在会说明
+  「NapCat/SnowLuma 都定义了 `reg_time`，拿不到时会省略该字段，所以清单里没有就说明这次真没返回」，
+  并附上本次两个接口实际返回的全部字段名。看到这条日志就能判断是适配器没给、还是插件不认。
+
+> 顺带：`birthday` 两边都不返回，所以生日这一行本来就指望不到；插件里只支持适配器/第三方资料库
+> 接口恰好带了生日字段时显示。
+
 ## v0.12.20
 
 需求：**1) 优化 WebUI（特别是配置页）；2) 加一个「是否展示注册时间」的配置**（用户问能不能直接在

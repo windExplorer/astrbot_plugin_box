@@ -42,9 +42,11 @@ def _hint_missing_profile_source(stranger_info: dict, member_info: dict) -> None
     if keys & {k.lower() for k in REG_TIME_KEYS} or keys & {k.lower() for k in BIRTHDAY_KEYS}:
         return
     logger.info(
-        "[资料卡] 适配器未返回注册时间/生日字段（QQ 官方无此接口，卡片上的注册时间"
-        "是按 QQ 号号段估算的）。本次 get_stranger_info/get_group_member_info 返回字段："
-        f"{sorted(merged.keys())}"
+        "[资料卡] 本次 get_stranger_info/get_group_member_info 都没返回注册时间/生日字段，"
+        "卡片上的注册时间将按 QQ 号号段估算。这两项都只能靠适配器扩展字段：NapCat 与 SnowLuma "
+        "的 get_stranger_info 都定义了 reg_time，但拿不到时会**直接省略该字段**（非好友、对方"
+        "隐私设置、适配器版本较旧都会这样），所以下面清单里没有 reg_time 就说明这次真的没返回。"
+        f"本次实际返回字段：{sorted(merged.keys())}"
     )
 
 # 新朋友卡（入群卡）固定补充显示的字段：新人的第一印象卡，就算「信息显示选项」里
