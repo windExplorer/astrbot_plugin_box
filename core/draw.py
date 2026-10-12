@@ -78,6 +78,7 @@ ROW_GAP = 14
 LINE_GAP = 6
 FONT_SIZE = 32
 TITLE_SIZE = 54
+TITLE_MIN_SIZE = 40  # 昵称缩到这么小还放不下就换行，不再继续缩
 LEVEL_SIZE = 26
 CHIP_SIZE = 28
 SUBTITLE_SIZE = 27
@@ -573,7 +574,8 @@ class CardMaker:
                 continue
             body.append([label, values])
         if not title:
-            title = "资料卡"
+            # 昵称/群昵称/备注全空（对方什么都没填）：用 QQ 号顶上，别让卡头空着
+            title = qq or "资料卡"
         return title, qq, sig, body
 
     def _level_metrics(self, level: str) -> dict:
@@ -603,34 +605,83 @@ class CardMaker:
             "total": 18 + pill_w + gap + rest_w,
         }
 
-    def _fit_title(self, title: str, level: str, card_type: str = "") -> tuple[ImageFont.FreeTypeFont, str]:
-        """Pick the largest title font (then truncate) that leaves room for the level badge and chip."""
+    def _fit_title(self, title: str, card_type: str = "") -> tuple[ImageFont.FreeTypeFont, list[str]]:
+        """昵称排版：先在可用宽度内缩字号；缩到最小还放不下就换行（最多两行）。
+
+        v0.12.24 起 QQ 等级徽章独占一行，昵称能用满整行宽度（之前要和等级抢同一行，
+        长昵称会被挤到只剩几个字）。换行优先于截断——昵称显示不全比多占一行更难看。
+        """
         text_x = PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
         chip = self._chip_metrics(card_type)
-        reserve = (self._level_metrics(level)["total"] if level else 0) + (chip[1] + 16 if chip else 0)
-        title_max = avail - reserve
+        title_max = avail - (chip[1] + 16 if chip else 0)
         size = TITLE_SIZE
-        while size > 40:
-            if self._measure(title, self._font(size)) <= title_max:
-                break
+        while size > TITLE_MIN_SIZE:
+            font = self._font(size)
+            if self._measure(title, font) <= title_max:
+                return font, [title]
             size -= 2
-        font = self._font(size)
-        if self._measure(title, font) > title_max:
-            title = self._truncate(title, font, title_max)
-        return font, title
+        font = self._font(TITLE_MIN_SIZE)
+        if self._measure(title, font) <= title_max:
+            return font, [title]
+        lines = self._wrap(title, font, title_max)[:2]
+        if len(lines) == 2 and self._measure(lines[1], font) > title_max:
+            lines[1] = self._truncate(lines[1], font, title_max)
+        return font, lines or [title]
 
-    def _header_height(self, title: str, level: str, sig: str, card_type: str = "") -> int:
+    def _header_layout(self, title: str, level: str, sig: str, card_type: str = "") -> dict:
+        """卡头各行的坐标与总高度（绘制与高度计算共用这一份，免得两处算得不一样）。
+
+        行序：昵称（独占整行）→ QQ 等级徽章（单独一行）→ QQ 号 → 签名（最多两行）。
+        等级单独占一行几乎不增加卡片高度——卡头本来就被头像直径托底
+        （``AVATAR_D + AVATAR_RING * 2 + 40``），只有带签名时才会真的变高。
+        """
         text_x = PAD + AVATAR_D + 52
         avail = CARD_W - PAD - text_x - 40
-        title_font, _ = self._fit_title(title, level, card_type)
-        title_h = sum(title_font.getmetrics())
-        h = HEADER_TOP_PAD + title_h + 8 + sum(self._font(SUBTITLE_SIZE).getmetrics()) + 6
+        title_font, title_lines = self._fit_title(title, card_type)
+
+        y = HEADER_TOP_PAD
+        title_y = y
+        y += sum(title_font.getmetrics()) * len(title_lines) + 8
+
+        level_y = -1
+        level_h = 0
+        if level:
+            level_y = y
+            metrics = self._level_metrics(level)
+            level_h = max(sum(metrics["font"].getmetrics()), metrics["pill_h"]) + 6
+            y += level_h + 6
+
+        qq_y = y
+        y += sum(self._font(SUBTITLE_SIZE).getmetrics()) + 6
+
+        sig_font = self._font(SIGN_SIZE)
+        sig_lines: list[str] = []
+        sig_y = y + 12
         if sig:
-            sig_font = self._font(SIGN_SIZE)
-            n = min(len(self._wrap(sig, sig_font, avail)), 2)
-            h += 12 + n * (sum(sig_font.getmetrics()) + 4)
-        return max(int(h) + 36, AVATAR_D + AVATAR_RING * 2 + 40)
+            sig_lines = self._wrap(sig, sig_font, avail)
+            if len(sig_lines) > 2:
+                sig_lines = sig_lines[:2]
+                sig_lines[1] = self._truncate(sig_lines[1], sig_font, avail)
+            y = sig_y + len(sig_lines) * (sum(sig_font.getmetrics()) + 4)
+
+        return {
+            "text_x": text_x,
+            "avail": avail,
+            "title_font": title_font,
+            "title_lines": title_lines,
+            "title_y": title_y,
+            "level_y": level_y,
+            "level_h": level_h,
+            "qq_y": qq_y,
+            "sig_y": sig_y,
+            "sig_lines": sig_lines,
+            "sig_font": sig_font,
+            "height": max(int(y) + 36, AVATAR_D + AVATAR_RING * 2 + 40),
+        }
+
+    def _header_height(self, title: str, level: str, sig: str, card_type: str = "") -> int:
+        return int(self._header_layout(title, level, sig, card_type)["height"])
 
     def _load_avatar(self, avatar: bytes) -> Image.Image:
         img = Image.open(BytesIO(avatar)).convert("RGBA")
@@ -738,53 +789,56 @@ class CardMaker:
         )
         img.paste(avatar_img, (int(ax - AVATAR_D / 2), int(ay - AVATAR_D / 2)), mask)
 
-        text_x = ox + PAD + AVATAR_D + 52
-        avail = CARD_W - PAD - text_x - 40
+        lay = self._header_layout(title, level, sig, card_type)
+        text_x = ox + lay["text_x"]
 
-        # title line: nickname + level badge
-        title_font, title = self._fit_title(title, level, card_type)
-        title_h = sum(title_font.getmetrics())
-        title_y = oy + HEADER_TOP_PAD
-        self._draw_mixed(img, draw, (text_x, title_y), title, title_font, (*TITLE_COLOR, 255))
-        if level:
+        # 行 1：昵称（独占整行，最多两行；长昵称不再被等级徽章挤短）
+        title_font = lay["title_font"]
+        title_lh = sum(title_font.getmetrics())
+        for i, line_text in enumerate(lay["title_lines"]):
+            self._draw_mixed(
+                img, draw, (text_x, oy + lay["title_y"] + i * title_lh),
+                line_text, title_font, (*TITLE_COLOR, 255),
+            )
+
+        # 行 2：QQ 等级徽章（独占一行）
+        if level and lay["level_y"] >= 0:
             m = self._level_metrics(level)
-            title_center = title_y + title_h / 2
-            lx = text_x + self._measure(title, title_font) + 18
+            level_center = oy + lay["level_y"] + lay["level_h"] / 2
+            lx = text_x
             if m["icons"]:
-                pill_y = title_center - m["pill_h"] / 2
+                pill_y = level_center - m["pill_h"] / 2
                 draw.rounded_rectangle(
                     [lx, pill_y, lx + m["pill_w"], pill_y + m["pill_h"]],
                     m["pill_h"] / 2,
                     fill=(255, 255, 255, 255),
                 )
                 ascent = m["font"].getmetrics()[0]
-                icons_y = title_center - ascent / 2 - m["font"].size * 0.06
+                icons_y = level_center - ascent / 2 - m["font"].size * 0.06
                 self._draw_mixed(img, draw, (lx + 12, icons_y), m["icons"], m["font"], (*TITLE_COLOR, 255))
+                lx += m["pill_w"]
             if m["rest"]:
                 rest_lh = sum(m["font"].getmetrics())
-                rest_x = lx + m["pill_w"] + m["gap"] if m["icons"] else lx
+                if m["icons"]:
+                    lx += m["gap"]
                 self._draw_mixed(
-                    img, draw, (rest_x, title_center - rest_lh / 2), m["rest"], m["font"], (*TITLE_COLOR, 255)
+                    img, draw, (lx, level_center - rest_lh / 2), m["rest"], m["font"], (*TITLE_COLOR, 255)
                 )
 
-        # QQ line: "QQ" label + one cute tilted square per digit
-        sub_y = title_y + title_h + 8
+        # 行 3：QQ 号（"QQ" 标签 + 每位一个白色小方块）
         if qq:
-            self._paint_qq_digits(img, draw, text_x + 2, sub_y, qq)
-        # signature line(s)
-        if sig:
-            sig_font = self._font(SIGN_SIZE)
-            sig_y = sub_y + sum(self._font(SUBTITLE_SIZE).getmetrics()) + 12
+            self._paint_qq_digits(img, draw, text_x + 2, oy + lay["qq_y"], qq)
+
+        # 行 4：个性签名（最多两行）
+        sig_lines = lay["sig_lines"]
+        if sig_lines:
+            sig_font = lay["sig_font"]
             sig_lh = sum(sig_font.getmetrics())
-            lines = self._wrap(sig, sig_font, avail)
-            if len(lines) > 2:
-                lines = lines[:2]
-                lines[1] = self._truncate(lines[1], sig_font, avail)
-            for i, part in enumerate(lines):
+            for i, part in enumerate(sig_lines):
                 self._draw_mixed(
                     img, draw,
-                    (text_x + 2, sig_y + i * (sig_lh + 4)),
-                    f"“{part}”" if len(lines) == 1 else (f"“{part}" if i == 0 else f"{part}”"),
+                    (text_x + 2, oy + lay["sig_y"] + i * (sig_lh + 4)),
+                    f"“{part}”" if len(sig_lines) == 1 else (f"“{part}" if i == 0 else f"{part}”"),
                     sig_font, (*SIGN_COLOR, 255),
                 )
 

@@ -90,6 +90,8 @@ class BoxResult:
 
     welcome_text: str = ""  # 入群卡内嵌欢迎语
     welcome_image: bytes | None = None  # 入群卡内嵌欢迎图片
+    avatar_bytes: bytes | None = None  # 本次取到的头像（渲染与 AI 共用，不进卡片缓存）
+    nickname_missing: bool = False  # 昵称/群昵称都空（已用 QQ 号兜底显示）
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -226,6 +228,11 @@ class BoxService:
             library_info,
             like_count=like_count,
         )
+        # 昵称兜底：空白昵称会让卡头空着，也会让 AI 把「资料里没有昵称」当成问题来回答；
+        # 依次回退群昵称 → QQ 号。是否真的缺失记下来，后面拼提示词时用。
+        nickname_missing = not (profile.nickname or "").strip()
+        if nickname_missing:
+            profile.nickname = (profile.card or "").strip() or f"QQ {target_id}"
         display = profile.to_display_lines(
             display_options,
             desensitize=self.cfg.desensitize,
@@ -349,13 +356,24 @@ class BoxService:
             level_text=level_text,
             card_type=card_type,
             display_name=profile.card or profile.nickname or target_id,
+            nickname_missing=nickname_missing,
         )
 
         if group_id:
             result.join_rank, result.join_pos, result.join_total = await self._get_join_rank(
                 bot, group_id, target_id
             )
-        result.analyses = await self._get_analyses(target_id, profile, display, card_type)
+        # 头像先取一次：AI 头像/综合锐评需要判断「有没有图可看」（空头像就别硬解读），
+        # 渲染时复用同一份字节，同一张卡不用下载两次
+        result.avatar_bytes = await self._get_avatar(target_id)
+        result.analyses = await self._get_analyses(
+            target_id,
+            profile,
+            display,
+            card_type,
+            avatar_ok=bool(result.avatar_bytes),
+            nickname_missing=nickname_missing,
+        )
         if card_type == "join" and self.cfg.welcome_enabled:
             result.welcome_text = await self._build_welcome(result)
             pool = [u for u in (self.cfg.welcome_images or []) if str(u).strip()]
@@ -365,7 +383,9 @@ class BoxService:
 
     async def render_box_image(self, result: BoxResult) -> bytes:
         """Render the box card image (fresh every time: the card shows the fetch time)."""
-        avatar = await self._get_avatar(result.target_id)
+        # fetch_card 已经取过一次头像（含 AI 判断"有没有图"），直接复用；缓存命中的
+        # 旧卡片没有这份字节，才在这里现取
+        avatar = result.avatar_bytes or await self._get_avatar(result.target_id)
         if not avatar:
             avatar = self.renderer.create_placeholder_avatar()
 
@@ -561,7 +581,9 @@ class BoxService:
             count_text = f"你是本群第 {result.join_pos} 位成员（共 {result.join_total} 人）"
 
         if self.cfg.welcome_ai_enabled:
-            ai_text = await self._gen_welcome_ai(name, count_text)
+            ai_text = await self._gen_welcome_ai(
+                name, count_text, nickname_missing=result.nickname_missing
+            )
             if ai_text:
                 parts = ([count_text] if count_text else []) + [f"✨ {ai_text}"]
                 return "\n".join(parts)
@@ -576,8 +598,14 @@ class BoxService:
         text = "\n".join(line for line in text.splitlines() if line.strip())
         return text
 
-    async def _gen_welcome_ai(self, name: str, count_text: str = "") -> str:
-        """Optional LLM-generated welcome line, with retries."""
+    async def _gen_welcome_ai(
+        self, name: str, count_text: str = "", nickname_missing: bool = False
+    ) -> str:
+        """Optional LLM-generated welcome line, with retries.
+
+        对方没设昵称时（name 已经是兜底值）在提示词里说明一句，避免模型因为
+        「叫不出名字」而回一句「无法生成」之类的提示信息。
+        """
         provider = self._resolve_llm("welcome")
         if not provider:
             return ""
@@ -589,11 +617,20 @@ class BoxService:
         )
         if not prompt:
             return ""
+        if nickname_missing:
+            prompt += (
+                "\n\n补充：这位新朋友没有设置昵称，请直接称呼「这位新朋友」或用「你」，"
+                "不要提及昵称缺失，也不要输出任何解释或提示。"
+            )
         retries = max(0, int(self.cfg.welcome_ai_retry or 0))
         for attempt in range(retries + 1):
             try:
                 resp = await provider.text_chat(prompt=prompt)
-                return (resp.completion_text or "").strip()[:100]
+                text = (resp.completion_text or "").strip()[:100]
+                if self._is_empty_looking_analysis(text):
+                    logger.info(f"[资料卡] AI 欢迎语返回的是提示信息，已丢弃：{text[:40]}")
+                    return ""
+                return text
             except Exception as e:
                 logger.debug(f"[资料卡] AI 欢迎语第 {attempt + 1}/{retries + 1} 次生成失败: {e}")
         return ""
@@ -697,10 +734,43 @@ class BoxService:
         except (TypeError, ValueError):
             return None
 
+    # 模型其实"什么都没看到"时会说的词：这类回复留在卡片上只是噪音，丢掉
+    _AI_NOTHING_SEE_HINTS = (
+        "无法查看",
+        "无法识别",
+        "无法加载",
+        "无法提供",
+        "看不到图",
+        "没有图片",
+        "图片无法",
+        "没有提供图片",
+        "未提供图片",
+        "图片不可用",
+    )
+
+    @classmethod
+    def _is_empty_looking_analysis(cls, text: str) -> bool:
+        """判断一条 AI 分析是不是「其实没看到内容」的提示语（空回复也算）。"""
+        if not text:
+            return True
+        return any(hint in text for hint in cls._AI_NOTHING_SEE_HINTS)
+
     async def _get_analyses(
-        self, target_id: str, profile: BoxUserProfile, display: list[str], card_type: str = ""
+        self,
+        target_id: str,
+        profile: BoxUserProfile,
+        display: list[str],
+        card_type: str = "",
+        avatar_ok: bool = True,
+        nickname_missing: bool = False,
     ) -> dict[str, str]:
-        """Run the enabled AI analyses (avatar / signature / overall) concurrently."""
+        """Run the enabled AI analyses (avatar / signature / overall) concurrently.
+
+        ``avatar_ok`` 为 False（头像没下下来 / 是占位图）时，带图的两项直接跳过——
+        让模型对着空白硬编只会产出「无法查看图片」这类废话。``nickname_missing``
+        用来给提示词加一句「对方没设昵称」，免得模型因为看不到昵称就回一句
+        「资料不足，无法判断」。
+        """
         ai = self.cfg.ai_analysis
         # 退群/被踢卡默认不调用 LLM，除非显式开启 event_analysis
         if card_type in ("leave", "kick") and not ai.event_analysis:
@@ -708,28 +778,41 @@ class BoxService:
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={target_id}&spec=640"
         signature = (profile.long_nick or "").strip()
         profile_text = "\n".join(display)
+        name_hint = (
+            "该用户没有设置昵称和群昵称，请用「这位朋友」或「你」来称呼，不要提及昵称缺失。"
+            if nickname_missing
+            else ""
+        )
 
         # (key, provider, (prompt, with_image))
         specs: list[tuple[str, Any, tuple[str, bool]]] = []
-        if ai.avatar_analysis:
+        if ai.avatar_analysis and avatar_ok:
             specs.append(
                 ("avatar", self._resolve_llm("avatar"),
                  ("这是一位QQ用户的头像图片。请根据头像画面，用轻松幽默的语气写一句话点评这位用户，"
-                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", True))
+                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。"
+                  "特别地：如果这张头像是QQ默认头像、纯色或一片空白，请只写"
+                  "「这位朋友还没设置头像呢」这样一句话，不要编造画面内容，"
+                  "也不要回答你无法查看图片。", True))
             )
         if ai.signature_analysis and signature:
             specs.append(
                 ("signature", self._resolve_llm("signature"),
                  (f"一位QQ用户的个性签名是：「{signature}」。请据此用轻松幽默的语气写一句话点评这位用户，"
-                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。", False))
+                  "不超过40个字。直接输出点评内容，不要任何前缀、引号或解释。"
+                  "签名内容如果很随意或是占位符，也照样轻松发挥，不要说无法判断。", False))
             )
-        if ai.overall_analysis:
+        if ai.overall_analysis and avatar_ok:
             specs.append(
                 ("overall", self._resolve_llm("overall"),
                  ("这是一位QQ用户的头像图片和公开资料：\n"
-                  f"{profile_text}\n"
+                  f"昵称：{profile.nickname}\nQQ号：{target_id}\n{profile_text}\n"
                   "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"
-                  "直接输出锐评内容，不要任何前缀、引号或解释。", True))
+                  "直接输出锐评内容，不要任何前缀、引号或解释。"
+                  "上面资料里没有列出的字段，表示对方未公开或未填写；"
+                  "请只基于已有信息自由发挥，不要评价资料是否完整。"
+                  "如果这张头像是QQ默认头像或一片空白，就当对方没设头像来评。"
+                  f"{name_hint}", True))
             )
         if not specs:
             return {}
@@ -743,7 +826,13 @@ class BoxService:
                     prompt=prompt,
                     image_urls=[avatar_url] if with_image else None,
                 )
-                return key, (response.completion_text or "").strip()[:80]
+                text = (response.completion_text or "").strip()[:80]
+                if self._is_empty_looking_analysis(text):
+                    logger.info(
+                        f"[资料卡] AI {key} 返回的是「没看到内容」类提示，已丢弃：{text[:40]}"
+                    )
+                    return key, ""
+                return key, text
             except Exception as e:
                 logger.warning(f"llm analysis [{key}] failed: {e}")
                 return key, ""
@@ -752,6 +841,7 @@ class BoxService:
         return {key: text for key, text in pairs if text}
 
     async def _get_avatar(self, user_id: str) -> bytes | None:
+        """下载头像；失败返回 None（渲染时画占位头像，AI 侧据此跳过带图的分析）。"""
         avatar_url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
         try:
             async with aiohttp.ClientSession() as session:
@@ -759,5 +849,6 @@ class BoxService:
                 response.raise_for_status()
                 return await response.read()
         except Exception as e:
-            logger.error(f"Download avatar failed: {e}")
+            # 不再打 error：对方没设置头像 / 网络抖动时这是正常分支，卡片会画占位头像
+            logger.warning(f"Download avatar failed: {e}")
             return None
