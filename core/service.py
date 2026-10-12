@@ -91,7 +91,7 @@ class BoxResult:
     welcome_text: str = ""  # 入群卡内嵌欢迎语
     welcome_image: bytes | None = None  # 入群卡内嵌欢迎图片
     avatar_bytes: bytes | None = None  # 本次取到的头像（渲染与 AI 共用，不进卡片缓存）
-    nickname_missing: bool = False  # 昵称/群昵称都空（已用 QQ 号兜底显示）
+    nickname_missing: bool = False  # 昵称为空（卡头显示占位，称呼走「新朋友」兜底）
 
     @classmethod
     def fail(cls, msg: str, target_id: str = "", group_id: str = ""):
@@ -228,11 +228,10 @@ class BoxService:
             library_info,
             like_count=like_count,
         )
-        # 昵称兜底：空白昵称会让卡头空着，也会让 AI 把「资料里没有昵称」当成问题来回答；
-        # 依次回退群昵称 → QQ 号。是否真的缺失记下来，后面拼提示词时用。
+        # 昵称为空时不拿 QQ 号冒充（QQ 号本来就单独一行，重复展示没意义）：
+        # 卡头位置留一个「未设置昵称」占位（见 draw._split_header），「昵称」字段行
+        # 不占行。这里只记下"确实没有昵称"，供提示词与称呼兜底用。
         nickname_missing = not (profile.nickname or "").strip()
-        if nickname_missing:
-            profile.nickname = (profile.card or "").strip() or f"QQ {target_id}"
         display = profile.to_display_lines(
             display_options,
             desensitize=self.cfg.desensitize,
@@ -355,7 +354,9 @@ class BoxService:
             display=display,
             level_text=level_text,
             card_type=card_type,
-            display_name=profile.card or profile.nickname or target_id,
+            # 群昵称优先于个人昵称（群里大家认的是群昵称）；都没有就留空，
+            # 由 _build_welcome 兜底成「新朋友」——不要拿 QQ 号冒充名字
+            display_name=profile.card or profile.nickname or "",
             nickname_missing=nickname_missing,
         )
 
@@ -603,8 +604,8 @@ class BoxService:
     ) -> str:
         """Optional LLM-generated welcome line, with retries.
 
-        对方没设昵称时（name 已经是兜底值）在提示词里说明一句，避免模型因为
-        「叫不出名字」而回一句「无法生成」之类的提示信息。
+        对方没设昵称时（``name`` 已是「这位新朋友」之类的兜底）在提示词里说明一句，
+        避免模型因为「叫不出名字」而回一句「无法生成」之类的提示信息。
         """
         provider = self._resolve_llm("welcome")
         if not provider:
@@ -803,10 +804,15 @@ class BoxService:
                   "签名内容如果很随意或是占位符，也照样轻松发挥，不要说无法判断。", False))
             )
         if ai.overall_analysis and avatar_ok:
+            # 昵称为空时别在提示词里留一个「昵称：」空行，明写「未设置」更不容易
+            # 被模型当成资料缺失的信号
+            nickname_line = (
+                "昵称：未设置\n" if nickname_missing else f"昵称：{profile.nickname}\n"
+            )
             specs.append(
                 ("overall", self._resolve_llm("overall"),
                  ("这是一位QQ用户的头像图片和公开资料：\n"
-                  f"昵称：{profile.nickname}\nQQ号：{target_id}\n{profile_text}\n"
+                  f"{nickname_line}QQ号：{target_id}\n{profile_text}\n"
                   "请综合以上信息，用轻松幽默的语气写一句话锐评这位用户，不超过50个字。"
                   "直接输出锐评内容，不要任何前缀、引号或解释。"
                   "上面资料里没有列出的字段，表示对方未公开或未填写；"

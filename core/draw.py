@@ -574,8 +574,9 @@ class CardMaker:
                 continue
             body.append([label, values])
         if not title:
-            # 昵称/群昵称/备注全空（对方什么都没填）：用 QQ 号顶上，别让卡头空着
-            title = qq or "资料卡"
+            # 昵称/群昵称/备注全空（对方什么都没填）：给个明确的占位标识。
+            # 不拿 QQ 号顶替——QQ 号本来就单独画在下一行，重复展示反而让人误会
+            title = "未设置昵称"
         return title, qq, sig, body
 
     def _level_metrics(self, level: str) -> dict:
