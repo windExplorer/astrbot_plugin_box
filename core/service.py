@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import random
 from dataclasses import dataclass, field
@@ -52,6 +53,15 @@ def _hint_missing_profile_source(stranger_info: dict, member_info: dict) -> None
 # 新朋友卡（入群卡）固定补充显示的字段：新人的第一印象卡，就算「信息显示选项」里
 # 没勾也一并展示；字段本身没数据时不会占行（_format_field 会跳过空值）。
 JOIN_CARD_EXTRA_FIELDS = ("sex", "birthday", "age")
+
+# 参与「卡片外观指纹」的两个嵌套配置节点的字段（其余节点是标量，直接取）
+_AI_SWITCH_KEYS = ("avatar_analysis", "signature_analysis", "overall_analysis", "event_analysis")
+_LLM_MODEL_KEYS = ("fallback", "welcome", "avatar", "signature", "overall")
+
+
+def _cfg_get(node: Any, key: str) -> Any:
+    """安全读嵌套配置节点的字段：节点缺失或字段缺失都返回 None（不抛）。"""
+    return getattr(node, key, None) if node is not None else None
 
 library_display_options = [
     "names",
@@ -406,13 +416,38 @@ class BoxService:
         return result.image
 
     # ------------------------------------------------------------ 缓存与队列
+    def card_variant(self) -> str:
+        """卡片「外观指纹」：影响卡片像素或文字的配置集合的短哈希。
+
+        这些都是用户随时能改的设置（头像形状、脱敏、展示字段、AI 开关、欢迎语……）。
+        缓存里存的是**已渲染的图片**，配置一改旧卡就不该再被命中——否则改完设置还得
+        干等冷却期，用户会以为设置没生效。任一项变化 → 指纹变 → 旧缓存整体作废。
+        """
+        ai = getattr(self.cfg, "ai_analysis", None)
+        llm = getattr(self.cfg, "llm_models", None)
+        payload = [
+            self.cfg.avatar_shape,
+            self.cfg.desensitize,
+            self.cfg.show_reg_time,
+            self.cfg.record_join_leave,
+            self.cfg.welcome_enabled,
+            self.cfg.welcome_ai_enabled,
+            self.cfg.welcome_text,
+            [str(x) for x in (self.cfg.display_options or [])],
+            [str(x) for x in (self.cfg.welcome_images or [])],
+            *[_cfg_get(ai, key) for key in _AI_SWITCH_KEYS],
+            *[_cfg_get(llm, key) for key in _LLM_MODEL_KEYS],
+        ]
+        blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.md5(blob.encode("utf-8")).hexdigest()[:12]
+
     def _cache_lookup(self, group_id: str, user_id: str) -> BoxResult | None:
         """冷却期内的缓存卡片；过期/缺失/关闭缓存时返回 None。"""
         cooldown = int(self.cfg.cache_cooldown or 0)
         if cooldown <= 0:
             return None
         try:
-            cached = self.store.get_card_cache(group_id, user_id)
+            cached = self.store.get_card_cache(group_id, user_id, self.card_variant())
         except Exception as e:
             logger.warning(f"[资料卡] 读取卡片缓存失败: {e}")
             return None
@@ -457,6 +492,7 @@ class BoxService:
                 result.card_type,
                 result.image,
                 stale_before=(now - timedelta(minutes=cooldown)).strftime("%Y-%m-%d %H:%M:%S"),
+                variant=self.card_variant(),
             )
         except Exception as e:
             logger.warning(f"[资料卡] 写入卡片缓存失败: {e}")

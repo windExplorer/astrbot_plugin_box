@@ -7,10 +7,13 @@ leaver cards still show join/leave times.
 
 The card cache table keeps the last fetched card per (group, user) so that
 repeated queries within the cooldown window are served without re-hitting
-the QQ APIs or the LLM. It stores the **rendered image**, so a change to the
-card layout would otherwise keep serving stale pictures until the cooldown
-expired; rows therefore carry a ``layout`` stamp and only match reads when it
-equals :data:`CARD_LAYOUT_VERSION` (see ``_ensure_columns``).
+the QQ APIs or the LLM. It stores the **rendered image**, so anything that
+changes the card's look would otherwise keep serving stale pictures until the
+cooldown expired; rows therefore carry a ``layout`` stamp
+(``CARD_LAYOUT_VERSION:外观指纹``, see ``_layout_stamp``) and only match reads
+with the exact same stamp — bumping the version invalidates every cached card,
+and the fingerprint invalidates them whenever the user changes a look-related
+setting (avatar shape, desensitize, display options, AI switches...).
 
 ``group_roster`` stores a snapshot of the members actually present in a group
 (one row per member, replaced wholesale on every live member-list fetch). It is
@@ -339,13 +342,23 @@ class MemberStore:
             self._conn.close()
 
     # ---------------------------------------------------------- card cache
-    def get_card_cache(self, group_id: str, user_id: str) -> dict | None:
-        """Return the cached card, or None when absent/stale/布局版本不匹配。
+    @staticmethod
+    def _layout_stamp(variant: str = "") -> str:
+        """缓存行的布局标记 = 程序版本 + 卡片外观指纹。
 
-        布局版本对不上（升级前的旧图）就当没有缓存并顺手清掉：留着也没用，
-        下一次取数会重新渲染并覆盖它。
+        ``variant`` 由调用方（``BoxService.card_variant``）按当前配置算出来：头像
+        形状、脱敏、展示字段这些**用户可改**的设置一改，卡片像素/文字就变了，
+        旧缓存必须立刻作废，否则用户改完设置还要干等冷却期才看到变化。
         """
-        stamp = str(CARD_LAYOUT_VERSION)
+        return f"{CARD_LAYOUT_VERSION}:{variant.strip()}"
+
+    def get_card_cache(self, group_id: str, user_id: str, variant: str = "") -> dict | None:
+        """Return the cached card, or None when absent/stale/布局或外观不匹配。
+
+        标记对不上（升级前的旧图、改过外观设置的旧卡）就当没有缓存并顺手清掉：
+        留着也没用，下一次取数会重新渲染并覆盖它。
+        """
+        stamp = self._layout_stamp(variant)
         with self._lock:
             row = self._conn.execute(
                 """
@@ -387,6 +400,7 @@ class MemberStore:
         card_type: str,
         image: bytes,
         stale_before: str = "",
+        variant: str = "",
     ) -> None:
         """Store/refresh the cached card; rows older than stale_before are dropped."""
         with self._lock:
@@ -407,7 +421,7 @@ class MemberStore:
                     json.dumps(analyses, ensure_ascii=False),
                     card_type,
                     image,
-                    str(CARD_LAYOUT_VERSION),
+                    self._layout_stamp(variant),
                 ),
             )
             if stale_before:
