@@ -7,13 +7,28 @@ leaver cards still show join/leave times.
 
 The card cache table keeps the last fetched card per (group, user) so that
 repeated queries within the cooldown window are served without re-hitting
-the QQ APIs or the LLM.
+the QQ APIs or the LLM. It stores the **rendered image**, so a change to the
+card layout would otherwise keep serving stale pictures until the cooldown
+expired; rows therefore carry a ``layout`` stamp and only match reads when it
+equals :data:`CARD_LAYOUT_VERSION` (see ``_ensure_columns``).
 
 ``group_roster`` stores a snapshot of the members actually present in a group
 (one row per member, replaced wholesale on every live member-list fetch). It is
 what the panel's coverage numbers are measured against, so records of people
 who left without their notice ever being observed do not inflate the counts.
 """
+
+import json
+import sqlite3
+import threading
+from datetime import datetime
+from pathlib import Path
+
+# 卡片渲染布局版本。**改动卡片外观/字段结构时必须 +1**，否则冷却期内的旧图
+# 会被继续缓存命中，用户看到的还是老样子。
+#   1 = v0.12.24（卡头昵称独占一行、等级独立行）
+#   2 = v0.12.25（空昵称显示「未设置昵称」占位，不再用 QQ 号顶替）
+CARD_LAYOUT_VERSION = 2
 
 import json
 import sqlite3
@@ -39,6 +54,7 @@ CREATE TABLE IF NOT EXISTS card_cache (
     analyses   TEXT NOT NULL DEFAULT '{}',
     card_type  TEXT NOT NULL DEFAULT '',
     image      BLOB NOT NULL,
+    layout     TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS member_info (
@@ -75,7 +91,28 @@ class MemberStore:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._ensure_columns()
             self._conn.commit()
+
+    def _ensure_columns(self) -> None:
+        """给老库补上后加的列。
+
+        ``CREATE TABLE IF NOT EXISTS`` 对已存在的表是空操作，所以升级时新列不会
+        自动出现——没有这一步，INSERT 就会因为「no column named ...」直接报错，
+        插件连带崩掉。
+        """
+        wanted = {
+            "card_cache": {"layout": "TEXT NOT NULL DEFAULT ''"},
+        }
+        for table, columns in wanted.items():
+            existing = {
+                row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not existing:  # 表不存在（理论上不会，_SCHEMA 已建）
+                continue
+            for name, decl in columns.items():
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def get(self, group_id: str, user_id: str) -> tuple[str, str] | None:
         """Return (join_time, leave_time) texts, or None when unknown."""
@@ -303,14 +340,26 @@ class MemberStore:
 
     # ---------------------------------------------------------- card cache
     def get_card_cache(self, group_id: str, user_id: str) -> dict | None:
+        """Return the cached card, or None when absent/stale/布局版本不匹配。
+
+        布局版本对不上（升级前的旧图）就当没有缓存并顺手清掉：留着也没用，
+        下一次取数会重新渲染并覆盖它。
+        """
+        stamp = str(CARD_LAYOUT_VERSION)
         with self._lock:
             row = self._conn.execute(
                 """
                 SELECT fetched_at, display, level_text, join_rank, analyses, card_type, image
-                FROM card_cache WHERE group_id = ? AND user_id = ?
+                FROM card_cache WHERE group_id = ? AND user_id = ? AND layout = ?
                 """,
-                (group_id, user_id),
+                (group_id, user_id, stamp),
             ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    "DELETE FROM card_cache WHERE group_id = ? AND user_id = ? AND layout != ?",
+                    (group_id, user_id, stamp),
+                )
+                self._conn.commit()
         if not row:
             return None
         try:
@@ -344,8 +393,9 @@ class MemberStore:
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO card_cache
-                    (group_id, user_id, fetched_at, display, level_text, join_rank, analyses, card_type, image)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (group_id, user_id, fetched_at, display, level_text, join_rank, analyses,
+                     card_type, image, layout)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     group_id,
@@ -357,6 +407,7 @@ class MemberStore:
                     json.dumps(analyses, ensure_ascii=False),
                     card_type,
                     image,
+                    str(CARD_LAYOUT_VERSION),
                 ),
             )
             if stale_before:

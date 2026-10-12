@@ -780,7 +780,9 @@ class BoxService:
         signature = (profile.long_nick or "").strip()
         profile_text = "\n".join(display)
         name_hint = (
-            "该用户没有设置昵称和群昵称，请用「这位朋友」或「你」来称呼，不要提及昵称缺失。"
+            # 只说「个人昵称」：群昵称/备注有没有填是另一回事，模型自己能从资料行里看到，
+            # 说成「昵称和群昵称都没设」在退群卡上会变成假信息（群昵称通常还在库里）
+            "该用户没有设置个人昵称，请用「这位朋友」或「你」来称呼，不要提及昵称缺失。"
             if nickname_missing
             else ""
         )
